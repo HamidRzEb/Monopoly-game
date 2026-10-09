@@ -40,7 +40,7 @@ With Node and [pm2](https://pm2.keymetrics.io) installed (no Docker or root need
 
 ```bash
 git clone <your-repo-url> tycoon && cd tycoon
-pm2 start ecosystem.config.js     # starts "tycoon" on port 3000
+pm2 start ecosystem.config.js     # starts "tycoon" on port 3001
 pm2 save                          # remember it for restarts
 ```
 

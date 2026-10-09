@@ -15,7 +15,7 @@ module.exports = {
     time: true, // timestamp log lines
     env: {
       NODE_ENV: 'production',
-      PORT: 3000,
+      PORT: 3001, // 3000 is used by another app on the home server
       // Set TRUST_PROXY: '1' when a reverse proxy (nginx, Caddy, Cloudflare tunnel) sits in front,
       // so visitors' real IPs are used for the rate limits. Never set it when directly exposed.
     },
