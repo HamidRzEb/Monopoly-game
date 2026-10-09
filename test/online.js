@@ -115,7 +115,11 @@ function connect(port, room, key, onState) {
     r = await act(proposer, 'repay', { args: [999, 100] });
     assert.strictEqual(r.status, 400, 'unknown loan');
     // the host can change the speed, anyone else cannot
-    assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: proposer.key === a.key ? a.key : b.key, op: 'setSpeed', speed: 'fast' })).ok, proposer === a, 'only the host (Alice) may');
+    // the host is Alice (a); whoever is "proposer" this run, only Alice's request may succeed
+    const asProposer = await api(port, '/api/lobby', { room: a.room, key: proposer.key, op: 'setSpeed', speed: 'fast' });
+    assert.strictEqual(Boolean(asProposer.ok), proposer === a, 'only the host (Alice) may change the speed');
+    assert.strictEqual(room.settings.speed, proposer === a ? 'fast' : 'relaxed');
+    if (proposer !== a) assert.strictEqual(asProposer.status, 403);
     assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: a.key, op: 'setSpeed', speed: 'warp' })).status, 400);
     assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: a.key, op: 'setSpeed', speed: 'relaxed' })).ok, true);
     assert.strictEqual(room.settings.speed, 'relaxed');
