@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/trade-ai.js && node test/round-limit.js && node test/ratelimit.js && node test/simulate.js 100 && node test/online.js"
+    "test": "node test/trade-ai.js && node test/round-limit.js && node test/clientip.js && node test/ratelimit.js && node test/ratelimit-proxy.js && node test/simulate.js 100 && node test/online.js"
   },
   "engines": {
     "node": ">=18"

@@ -37,13 +37,60 @@ const LIMIT = {
 const MAX_STREAMS_PER_IP = num('LIMIT_STREAMS', 40);   // concurrent live connections per IP
 const hits = new Map();       // `${bucket}:${ip}` -> [timestamps]
 const streamsByIp = new Map();
-function clientIp(req) {
-  if (process.env.TRUST_PROXY) {
-    const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    if (fwd) return fwd;
+// ---- who is the visitor? --------------------------------------------------------------
+// Directly exposed: the connecting address. Behind a CDN/proxy every visitor would look like the
+// proxy, so (only when TRUST_PROXY is set) we read the visitor address from a header instead:
+//   CLIENT_IP_HEADER   a header the proxy OVERWRITES with the real address (e.g. ar-real-ip), else
+//   X-Forwarded-For    counting TRUST_PROXY hops from the right (the left side can be forged).
+//   TRUSTED_PROXY_CIDRS  comma-separated ranges; headers are believed only if the connection comes
+//                        from one of them, so someone hitting the origin directly can't fake them.
+const net = require('net');
+function normalizeIp(ip) { return String(ip || '').replace(/^::ffff:/i, ''); }
+function ipToBig(ip) {
+  ip = normalizeIp(ip);
+  const v = net.isIP(ip);
+  if (v === 4) return { v, n: ip.split('.').reduce((acc, o) => (acc << 8n) + BigInt(o), 0n), bits: 32 };
+  if (v === 6) {
+    let [head, tail] = ip.split('::');
+    const h = head ? head.split(':') : [], t = tail === undefined ? [] : (tail ? tail.split(':') : []);
+    const mid = tail === undefined ? [] : Array(8 - h.length - t.length).fill('0');
+    return { v, n: [...h, ...mid, ...t].reduce((acc, g) => (acc << 16n) + BigInt(parseInt(g || '0', 16)), 0n), bits: 128 };
   }
-  return req.socket.remoteAddress || 'unknown';
+  return null;
 }
+function parseCidr(text) {
+  const [addr, len] = text.trim().split('/');
+  const base = ipToBig(addr);
+  if (!base) throw new Error(`Bad TRUSTED_PROXY_CIDRS entry: ${text}`);
+  const prefix = len === undefined ? base.bits : Number(len);
+  const shift = BigInt(base.bits - prefix);
+  return { v: base.v, net: base.n >> shift, shift };
+}
+function inCidr(ip, cidr) {
+  const x = ipToBig(ip);
+  return !!x && x.v === cidr.v && (x.n >> cidr.shift) === cidr.net;
+}
+function makeClientIpResolver({ hops = 0, header = '', cidrs = [] } = {}) {
+  const ranges = cidrs.filter(Boolean).map(parseCidr);
+  const headerName = header.toLowerCase();
+  return function clientIp(req) {
+    const peer = normalizeIp(req.socket.remoteAddress) || 'unknown';
+    if (!hops) return peer;
+    if (ranges.length && !ranges.some((c) => inCidr(peer, c))) return peer; // not our proxy: ignore its headers
+    if (headerName) {
+      const v = normalizeIp(String(req.headers[headerName] || '').split(',')[0].trim());
+      if (net.isIP(v)) return v;
+    }
+    const parts = String(req.headers['x-forwarded-for'] || '').split(',').map((p) => normalizeIp(p.trim())).filter(Boolean);
+    const v = parts[parts.length - hops];
+    return v && net.isIP(v) ? v : peer;
+  };
+}
+const clientIp = makeClientIpResolver({
+  hops: process.env.TRUST_PROXY ? (parseInt(process.env.TRUST_PROXY, 10) || 1) : 0,
+  header: process.env.CLIENT_IP_HEADER || '',
+  cidrs: (process.env.TRUSTED_PROXY_CIDRS || '').split(',').map((x) => x.trim()),
+});
 function rateLimit(req, bucket) {
   if (!LIMITS_ON) return;
   const [max, windowMs] = LIMIT[bucket];
@@ -633,7 +680,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/health') {
       if (process.env.DEBUG_HEADERS) { // diagnostics for setting up a proxy/CDN: shows what the proxy forwards (off by default)
         const keep = Object.entries(req.headers).filter(([k]) => /^(x-|ar-|cf-|forwarded|via|true-client|client-ip|cdn)/.test(k));
-        console.log('DEBUG_HEADERS peer=' + req.socket.remoteAddress + ' ' + JSON.stringify(Object.fromEntries(keep)));
+        console.log('DEBUG_HEADERS peer=' + req.socket.remoteAddress + ' resolved=' + clientIp(req) + ' ' + JSON.stringify(Object.fromEntries(keep)));
       }
       return send(200, { ok: true, rooms: rooms.size });
     }
@@ -676,4 +723,4 @@ if (require.main === module) {
   server.listen(PORT, () => console.log(`Game server running on http://localhost:${PORT}`));
   process.on('SIGTERM', () => process.exit(0));
 }
-module.exports = { server, rooms };
+module.exports = { server, rooms, makeClientIpResolver };

@@ -61,6 +61,9 @@ Start on boot, three ways:
 |---|---|---|
 | `PORT` | 3000 | Port to listen on |
 | `TRUST_PROXY` | unset | Set to `1` behind your own reverse proxy so visitors' real IPs are used for rate limits. **Do not set it when the game is directly exposed**, or visitors could fake their IP. |
+| `CLIENT_IP_HEADER` | unset | Header the proxy **overwrites** with the visitor's address (ArvanCloud: `ar-real-ip`). Without it, `X-Forwarded-For` is used, counting `TRUST_PROXY` hops from the right. |
+| `TRUSTED_PROXY_CIDRS` | unset | Comma-separated proxy address ranges. Visitor headers are only believed when the connection comes from one of them, so nobody can fake them by calling the server directly. The ArvanCloud ranges are in `deploy/arvancloud-ips.txt` (`ecosystem.config.js` loads them). |
+| `DEBUG_HEADERS` | unset | Set to `1` to log the proxy headers (and the address the game derived) on `/api/health` requests, for setting up a CDN. |
 | `LIMIT_CREATE` | 20 | New rooms per IP per 10 minutes |
 | `LIMIT_JOIN` | 60 | Join attempts per IP per 10 minutes |
 | `LIMIT_API` | 2400 | Other requests per IP per minute |
