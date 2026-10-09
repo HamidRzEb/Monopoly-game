@@ -1,0 +1,15 @@
+{
+  "name": "tycoon-online",
+  "version": "1.0.0",
+  "description": "A Monopoly-like board game for friends and bots, playable in the browser.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/trade-ai.js && node test/round-limit.js && node test/ratelimit.js && node test/simulate.js 100 && node test/online.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
+}

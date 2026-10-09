@@ -1,0 +1,8 @@
+{$DOMAIN:localhost} {
+	@notsse not path /api/events
+	encode @notsse zstd gzip
+
+	reverse_proxy game:3000 {
+		flush_interval -1   # push live game updates (Server-Sent Events) immediately
+	}
+}

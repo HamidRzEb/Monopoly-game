@@ -1,0 +1,29 @@
+# Production: the game behind Caddy, which gets and renews a free HTTPS certificate automatically.
+#   DOMAIN=play.example.com docker compose up -d --build
+# (point the domain's DNS A record at this server first; ports 80 and 443 must be open)
+services:
+  game:
+    build: .
+    restart: unless-stopped
+    environment:
+      PORT: "3000"
+      TRUST_PROXY: "1"        # read the real visitor IP from Caddy (needed for the rate limits)
+    expose:
+      - "3000"
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - game
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:-localhost}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,17 @@
+# Alternative to Docker: run with systemd.  Copy to /etc/systemd/system/tycoon.service
+[Unit]
+Description=Tycoon board game server
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/tycoon
+ExecStart=/usr/bin/node server.js
+Environment=PORT=3000
+Environment=TRUST_PROXY=1
+Restart=always
+User=tycoon
+NoNewPrivileges=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
