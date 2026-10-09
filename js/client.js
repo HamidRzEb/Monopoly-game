@@ -33,8 +33,37 @@
     finally { S.inflight = false; }
   }
 
-  const saveSession = () => { try { sessionStorage.setItem('tycoon.session', JSON.stringify({ room: S.room, key: S.key })); } catch { /* private mode */ } };
+  // Who you are in a game is a secret key. It is kept for this tab (sessionStorage) AND for the whole browser
+  // (localStorage, up to 24h), so closing a tab or restarting the browser doesn't lose your seat.
+  const SESSIONS_KEY = 'tycoon.sessions', SESSION_TTL = 24 * 60 * 60 * 1000;
+  const loadSessions = () => {
+    try {
+      const all = JSON.parse(localStorage.getItem(SESSIONS_KEY) || '{}');
+      for (const k of Object.keys(all)) if (Date.now() - all[k].ts > SESSION_TTL) delete all[k];
+      return all;
+    } catch { return {}; }
+  };
+  const storeSessions = (all) => { try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(all)); } catch { /* private mode */ } };
+  const saveSession = () => {
+    try { sessionStorage.setItem('tycoon.session', JSON.stringify({ room: S.room, key: S.key })); } catch { /* private mode */ }
+    const all = loadSessions();
+    all[S.room] = { key: S.key, ts: Date.now() };
+    storeSessions(all);
+  };
+  const clearSession = (code) => {
+    try { sessionStorage.removeItem('tycoon.session'); } catch { /* ignore */ }
+    const all = loadSessions();
+    delete all[code];
+    storeSessions(all);
+  };
   const readSession = () => { try { return JSON.parse(sessionStorage.getItem('tycoon.session')); } catch { return null; } };
+  async function getJson(path) {
+    const r = await fetch(path);
+    let j = {};
+    try { j = await r.json(); } catch { /* non-JSON error */ }
+    if (!r.ok) throw new Error(j.error || 'Request failed.');
+    return j;
+  }
   const savedName = () => { try { return localStorage.getItem('tycoon.name') || ''; } catch { return ''; } };
   const saveName = (n) => { try { localStorage.setItem('tycoon.name', n); } catch { /* ignore */ } };
 
@@ -50,10 +79,10 @@
     S.es = es;
     es.addEventListener('state', (e) => { if (S.es !== es) return; setConn('ok'); onState(JSON.parse(e.data)); });
     es.addEventListener('toast', (e) => toast(JSON.parse(e.data).text));
-    es.addEventListener('kicked', () => { if (S.es === es) leaveLocal('You were removed from the room.'); });
+    es.addEventListener('kicked', () => { if (S.es === es) leaveLocal('Your seat was taken over from another device, or you were removed. Enter your name and press Join to take it back.', true); });
     es.onerror = () => {
       if (S.es !== es) return;
-      if (es.readyState === EventSource.CLOSED) leaveLocal('That room is gone or you were disconnected.');
+      if (es.readyState === EventSource.CLOSED) leaveLocal('You were disconnected. Enter your name and press Join to take your seat back.', true);
       else setConn('retry');
     };
   }
@@ -61,17 +90,19 @@
     if (S.es) { const es = S.es; S.es = null; es.close(); }
     setConn('ok');
   }
-  function leaveLocal(message) {
+  function leaveLocal(message, keepRoom) {
     disconnect();
-    try { sessionStorage.removeItem('tycoon.session'); } catch { /* ignore */ }
+    const code = S.room;
+    if (code) clearSession(code);
     S.room = S.key = S.view = S.game = null;
     S.layoutBuilt = false; S.seenRoll = S.seenCard = null; S.shownOver = false;
     S.prevCash = {}; S.prevJail = {}; S.prevOwners = null;
     closeModal();
-    history.replaceState(null, '', location.pathname);
+    // keepRoom: stay on /?room=CODE so the home screen is pre-filled and the person can rejoin
+    history.replaceState(null, '', keepRoom && code ? `?room=${code}` : location.pathname);
     document.title = THEME.title;
-    renderHome();
-    if (message) toast(message);
+    renderHome(keepRoom && code ? code : '');
+    if (message) toast(message, 7000);
   }
   async function leave() {
     if (!confirm('Leave this room?' + (S.view && S.view.status === 'playing' ? ' A bot will take your place.' : ''))) return;
@@ -105,14 +136,22 @@
     const create = async () => { const n = getName(); if (n) try { enter(await post('/api/create', { name: n })); } catch (e) { toast(e.message); } };
     const join = async () => {
       const n = getName(); if (!n) return;
-      if (code.value.trim().length !== 4) return toast('Room codes have 4 letters.');
-      try { enter(await post('/api/join', { room: code.value.trim().toUpperCase(), name: n })); } catch (e) { toast(e.message); }
+      const c = code.value.trim().toUpperCase();
+      if (c.length !== 4) return toast('Room codes have 4 letters.');
+      try {
+        const info = await getJson(`/api/room?room=${c}`);
+        if (info.status === 'playing') return rejoinDialog(c, n, info, enter, join); // started: take back a free seat
+        enter(await post('/api/join', { room: c, name: n }));
+      } catch (e) { toast(e.message); }
     };
+    const myGames = h('div', { class: 'my-games' });
+    showMyGames(myGames, enter);
     code.addEventListener('input', () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ''); });
     app.replaceChildren(h('div', { class: 'screen' }, h('div', { class: 'card home' },
       icon('assets/logo', '', 'home-logo'),
       h('h1', { class: 'home-title' }, THEME.title),
       h('p', { class: 'muted' }, 'Buy, trade and bankrupt your friends. Add bots to fill the table.'),
+      myGames,
       name,
       h('button', { class: 'btn primary big', onclick: create }, 'Create online room'),
       h('button', { class: 'btn big', onclick: () => localSetup(name.value.trim()) }, 'Local co-op (same device)'),
@@ -120,6 +159,46 @@
       h('div', { class: 'or' }, 'or join an online room'),
       h('div', { class: 'row' }, code, h('button', { class: 'btn big', onclick: join }, 'Join')))));
     name.focus();
+  }
+
+  // "Your games": games this browser is still part of. Each is checked with the server first, so only
+  // ones that still work are offered.
+  async function showMyGames(box, enter) {
+    const all = loadSessions();
+    for (const [code, sess] of Object.entries(all)) {
+      let info;
+      try { info = await getJson(`/api/room?room=${code}&key=${encodeURIComponent(sess.key)}`); } catch { clearSession(code); continue; }
+      if (!info.valid) { const rest = loadSessions(); delete rest[code]; storeSessions(rest); continue; }
+      const mine = info.status === 'playing' ? 'game in progress' : 'waiting in the lobby';
+      box.append(h('div', { class: 'my-game' },
+        h('div', {}, h('b', {}, `Room ${code}`), h('span', { class: 'muted' }, ` · ${mine} · ${info.seats.length} players`)),
+        h('button', { class: 'btn primary', onclick: () => enter({ room: code, key: sess.key }) }, 'Rejoin')));
+    }
+    if (box.children.length) box.prepend(h('div', { class: 'muted small-note' }, 'Your games'));
+  }
+
+  // The game has already started: the only way in is to take back a seat that is free (its player is
+  // disconnected, or a bot took over).
+  function rejoinDialog(code, typedName, info, enter, retry) {
+    const free = info.seats.filter((s) => s.reclaimable);
+    const claim = async (seat) => {
+      try {
+        const r = await post('/api/join', { room: code, name: seat.name, seat: seat.index });
+        closeModal();
+        enter(r);
+      } catch (e) { toast(e.message); }
+    };
+    openModal(() => h('div', { class: 'rejoin' },
+      h('h2', {}, `Room ${code} has already started`),
+      free.length
+        ? [h('p', { class: 'muted' }, 'Were you playing? Choose your seat to take it back:'),
+          h('div', { class: 'rejoin-list' }, free.map((s) => h('button', { class: 'rejoin-seat' + (s.name.toLowerCase() === typedName.toLowerCase() ? ' match' : ''), onclick: () => claim(s) },
+            Board.tokenIcon(s.token), h('span', { class: 'rs-name' }, s.name), h('small', {}, s.bot ? 'a bot is playing for them' : 'disconnected'))))]
+        : h('p', {}, 'Every player in this game is connected right now, so there is no free seat. If you were playing and got disconnected, give it a few seconds and press Refresh.'),
+      h('div', { class: 'btn-row' },
+        h('button', { class: 'btn', onclick: () => { closeModal(); retry(); } }, 'Refresh'),
+        h('button', { class: 'btn ghost', onclick: closeModal }, 'Cancel'))),
+    { kind: 'rejoin', live: false });
   }
 
   // Local co-op: a few people share this screen. Names are collected here, then it's the normal lobby
@@ -903,9 +982,13 @@
   function boot() {
     document.title = THEME.title;
     const code = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
-    const saved = readSession();
+    let saved = readSession();
+    if (!(saved && saved.room && (!code || saved.room === code)) && code) { // new tab / restarted browser: use the browser's memory
+      const remembered = loadSessions()[code];
+      if (remembered) saved = { room: code, key: remembered.key };
+    }
     if (saved && saved.room && (!code || saved.room === code)) {
-      S.room = saved.room; S.key = saved.key;
+      S.room = saved.room; S.key = saved.key; saveSession();
       app.replaceChildren(h('div', { class: 'screen' }, h('div', { class: 'card' }, h('p', {}, 'Reconnecting…'))));
       connect();
     } else {

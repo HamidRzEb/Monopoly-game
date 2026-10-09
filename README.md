@@ -32,6 +32,14 @@ The server must be reachable by your friends. Easiest options:
   `npm start`; it listens on `$PORT`. A `Dockerfile` is included.
   Game state lives in server memory, so run a single instance (restarting ends games).
 
+## Rejoining a game
+
+Your seat is tied to a secret key that the browser remembers for 24 hours, so closing the tab or restarting the
+browser doesn't lose it: reopen the invite link and you're back, or press **Rejoin** under "Your games" on the home
+screen. From another device, enter the room code and your name and press Join: a started game shows the seats whose
+players are disconnected (or that a bot took over) and you take yours back. A connected player's seat can't be taken,
+and taking a seat back invalidates the old key.
+
 ## The bank
 
 Players can borrow from the bank during their own turn (the **Bank** button). The bank lends up to half

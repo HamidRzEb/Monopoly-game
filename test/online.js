@@ -196,6 +196,67 @@ function connect(port, room, key, onState) {
     assert.strictEqual(lroom.seats.filter((s) => s.key === L.key).length, 4, 'local players stay after a rematch');
   }
 
+  // ---- rejoining a game you were disconnected from
+  {
+    const getRoom = async (code, key) => JSON.parse((await request(port, 'GET', `/api/room?room=${code}${key ? '&key=' + key : ''}`)).body);
+    const X = await api(port, '/api/create', { name: 'Xena' });
+    const Y = await api(port, '/api/join', { room: X.room, name: 'Yan' });
+    await api(port, '/api/lobby', { room: X.room, key: X.key, op: 'addBot' });
+    assert.strictEqual((await api(port, '/api/lobby', { room: X.room, key: X.key, op: 'start' })).ok, true);
+    const rr = rooms.get(X.room);
+    const idx = (name) => rr.seats.findIndex((x) => x.name === name);
+
+    // nobody has a live connection yet, so both humans' seats are free to take back; the bot's is not
+    let info = await getRoom(X.room);
+    assert.strictEqual(info.status, 'playing');
+    assert.deepStrictEqual(info.seats.map((x) => [x.name, x.reclaimable]).sort(), [['Ada', false], ['Xena', true], ['Yan', true]].sort());
+    assert(info.seats.every((x) => !('key' in x)), 'keys are never exposed');
+    assert.strictEqual((await getRoom(X.room, X.key)).valid, true, 'a saved key that still works is reported valid');
+    assert.strictEqual((await getRoom(X.room, 'stale')).valid, false);
+    assert.strictEqual((await api(port, '/api/join', { room: X.room, name: 'Stranger' })).status, 400, 'cannot just join a started game');
+
+    // Xena is connected -> her seat is protected
+    const live = connect(port, X.room, X.key, () => {});
+    await new Promise((r) => setTimeout(r, 300));
+    assert.strictEqual((await getRoom(X.room)).seats.find((x) => x.name === 'Xena').reclaimable, false);
+    assert.strictEqual((await api(port, '/api/join', { room: X.room, name: 'thief', seat: idx('Xena') })).status, 409, "cannot take a connected player's seat");
+    assert.strictEqual((await api(port, '/api/join', { room: X.room, name: 'xena' })).status, 400, 'by-name only works for free seats');
+    assert.strictEqual((await api(port, '/api/join', { room: X.room, name: 'x', seat: idx('Ada') })).status, 409, "a bot that was never a player can't be claimed");
+
+    // Yan comes back from a new device: takes the seat, gets a NEW key, the old key stops working
+    const back = await api(port, '/api/join', { room: X.room, name: 'Yan', seat: idx('Yan') });
+    assert(back.key && back.key !== Y.key && back.seat === idx('Yan'));
+    assert.strictEqual((await api(port, '/api/action', { room: X.room, key: Y.key, action: 'endTurn', args: [] })).status, 403, 'old key is dead');
+    assert.strictEqual((await getRoom(X.room, back.key)).valid, true);
+    assert.strictEqual(rr.seats[idx('Yan')].type, 'human');
+    assert(rr.game.log.some((l) => /Yan has rejoined/.test(l.text)));
+
+    // leaving mid-game hands the seat to a bot, but the person can still come back (by name, any case)
+    await api(port, '/api/leave', { room: X.room, key: back.key });
+    assert.strictEqual(rr.seats[idx('Yan')].type, 'bot');
+    info = await getRoom(X.room);
+    assert.strictEqual(info.seats.find((x) => x.name === 'Yan').reclaimable, true, 'a seat a bot took over can be reclaimed');
+    const again = await api(port, '/api/join', { room: X.room, name: 'yAN' });
+    assert(again.key, JSON.stringify(again));
+    assert.strictEqual(rr.seats[idx('Yan')].type, 'human');
+    assert.strictEqual(rr.game.players[idx('Yan')].ai, false, 'the game stops treating them as a bot');
+    // bankrupt players are out for good
+    rr.game.players[idx('Yan')].bankrupt = true; rr.seats[idx('Yan')].connected = false;
+    assert.strictEqual((await getRoom(X.room)).seats.find((x) => x.name === 'Yan').reclaimable, false);
+    live.destroy();
+
+    // a local co-op browser that lost its key gets ALL its seats back under one new key
+    const L = await api(port, '/api/create', { name: 'Lia', locals: ['Leo'] });
+    await api(port, '/api/lobby', { room: L.room, key: L.key, op: 'addBot' });
+    await api(port, '/api/lobby', { room: L.room, key: L.key, op: 'start' });
+    const lr = rooms.get(L.room);
+    const got = await api(port, '/api/join', { room: L.room, name: 'Leo', seat: lr.seats.findIndex((x) => x.name === 'Leo') });
+    assert(got.key && got.key !== L.key);
+    assert.strictEqual(lr.seats.filter((x) => x.key === got.key).length, 2, 'both local seats moved to the new key');
+    assert.strictEqual(lr.seats.filter((x) => x.key === L.key).length, 0);
+    console.log('rejoin flow OK');
+  }
+
   const c = await api(port, '/api/create', { name: 'Carol' });
   const d = await api(port, '/api/join', { room: c.room, name: 'Dan' });
   await api(port, '/api/lobby', { room: c.room, key: c.key, op: 'addBot' });

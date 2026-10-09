@@ -323,6 +323,39 @@ function cleanOffer(o) {
   return { cash: int(o.cash || 0), cards: int(o.cards || 0), props: [...new Set(props)] };
 }
 
+// ---- rejoining a game that has started
+// A seat can be taken back if its player is currently disconnected, or a bot took it over; never while its
+// player is connected, and not once bankrupt. Taking it back issues a NEW key (the old one stops working).
+function isReclaimable(room, i) {
+  const s = room.seats[i], g = room.game;
+  if (!g || !s || (g.players[i] && g.players[i].bankrupt)) return false;
+  return (s.type === 'human' && !s.connected) || (s.type === 'bot' && !!s.rejoinable);
+}
+function reclaimSeat(room, i) {
+  const seat = room.seats[i], oldKey = seat.key, newKey = rid(16);
+  // a local co-op browser owns several seats under one key: they all move to the new key together
+  const group = room.seats.map((s, j) => (oldKey && s.key === oldKey ? j : -1)).filter((j) => j >= 0);
+  if (!group.includes(i)) group.push(i);
+  for (const j of group) {
+    const s = room.seats[j];
+    for (const res of s.streams) { res.write('event: kicked\ndata: {}\n\n'); res.end(); } // stale tab of the old key
+    s.streams.clear();
+    s.key = newKey; s.type = 'human'; s.rejoinable = false; s.connected = false; s.lastSeen = Date.now();
+    if (room.game && room.game.players[j]) room.game.players[j].ai = false;
+  }
+  if (room.game) room.game.say(`${seat.name} has rejoined the game.`, i);
+  return newKey;
+}
+// What the "rejoin" screen needs: who can be claimed. Names/tokens only, never keys.
+function roomInfo(room, key) {
+  return {
+    code: room.code,
+    status: room.game ? 'playing' : 'lobby',
+    valid: !!key && room.seats.some((s) => s.key === key), // does this browser's saved key still work?
+    seats: room.seats.map((s, i) => ({ index: i, name: s.name, token: s.token, reclaimable: isReclaimable(room, i), bot: s.type === 'bot' })),
+  };
+}
+
 const routes = {
   'POST /api/create'(body, ctx) {
     if (rooms.size >= MAX_ROOMS) fail('The server is full. Try again later.', 503);
@@ -342,7 +375,20 @@ const routes = {
       const i = room.seats.findIndex((s) => s.key === body.key);
       if (i >= 0) return { room: room.code, key: body.key };
     }
-    if (room.game) fail('That game has already started.');
+    if (room.game) {
+      // Started game: the only way in is to take back a seat that is free (disconnected / bot-controlled).
+      let i = Number.isInteger(body.seat) ? body.seat : -1;
+      if (i < 0) { // by name, only if it is unambiguous
+        const want = clean(body.name, '').toLowerCase();
+        const hits = room.seats.map((s, j) => (isReclaimable(room, j) && want && s.name.toLowerCase() === want ? j : -1)).filter((j) => j >= 0);
+        if (hits.length === 1) i = hits[0];
+      }
+      if (i < 0 || !room.seats[i]) fail('That game has already started. If you were playing, choose your seat to rejoin.');
+      if (!isReclaimable(room, i)) fail('That seat is not free: its player is still connected.', 409);
+      const key = reclaimSeat(room, i);
+      broadcast(room);
+      return { room: room.code, key, seat: i };
+    }
     if (room.seats.length >= RULES.maxPlayers) fail('The room is full.');
     const seat = makeSeat(room, { name: clean(body.name, 'Player'), type: 'human' });
     room.seats.push(seat);
@@ -562,6 +608,7 @@ function convertToBot(room, i) {
   for (const res of s.streams) { res.write('event: kicked\ndata: {}\n\n'); res.end(); }
   s.streams.clear();
   s.type = 'bot'; s.key = null; s.connected = true;
+  s.rejoinable = true; // the person may come back and take this seat again
   if (room.game) {
     room.game.players[i].ai = true;
     room.game.say(`${s.name} has been replaced by a bot.`, i);
@@ -690,6 +737,10 @@ const server = http.createServer(async (req, res) => {
   };
   try {
     if (url.pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res, url);
+    if (url.pathname === '/api/room' && req.method === 'GET') {
+      rateLimit(req, 'join'); // same budget as joining: stops code guessing
+      return send(200, roomInfo(getRoom(url.searchParams.get('room')), url.searchParams.get('key')));
+    }
     if (url.pathname === '/api/health') {
       if (process.env.DEBUG_HEADERS) { // diagnostics for setting up a proxy/CDN: shows what the proxy forwards (off by default)
         const keep = Object.entries(req.headers).filter(([k]) => /^(x-|ar-|cf-|forwarded|via|true-client|client-ip|cdn)/.test(k));
