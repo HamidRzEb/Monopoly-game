@@ -16,6 +16,7 @@
   SPACES.forEach((s, i) => { if (s.group) (GROUPS[s.group] = GROUPS[s.group] || []).push(i); });
 
   const MANAGE_PHASES = ['roll', 'postroll', 'buy', 'debt'];
+  const AFTER = { t: 'after' };
 
   class Game {
     constructor({ players, rules = {}, rng = Math.random }) {
@@ -164,22 +165,16 @@
 
     // At the start of each of their turns a player pays one slice of every loan, plus interest.
     // If they can't afford it the normal debt rules apply (sell/mortgage, or go bankrupt).
-    collectInstallments() {
+    collectInstallments() { this.nextInstallment(this.loansOf(this.cur().id).map((l) => l.id), 0); }
+    nextInstallment(ids, k) {
       const p = this.cur();
-      const mine = this.loansOf(p.id);
-      const next = (k) => {
-        if (k >= mine.length) return;
-        const l = mine[k];
-        if (!this.loans.includes(l)) return next(k + 1);
+      for (; k < ids.length; k++) {
+        const l = this.loans.find((x) => x.id === ids[k]);
+        if (!l) continue;
         const principal = Math.min(l.step, l.remaining), interest = this.interestDue(l);
         this.say(`${p.name}'s bank payment is due: ${this.money(principal + interest)} (${this.money(interest)} interest).`, p.id);
-        this.charge(p, principal + interest, null, () => {
-          l.remaining -= principal;
-          if (l.remaining <= 0) { this.loans = this.loans.filter((x) => x !== l); this.say(`${p.name}'s ${this.money(l.principal)} loan is paid off.`, p.id); }
-          next(k + 1);
-        });
-      };
-      next(0);
+        return this.charge(p, principal + interest, null, { t: 'installment', ids, k, loanId: l.id, principal });
+      }
     }
 
     rentFor(i, diceSum, opts = {}) {
@@ -208,6 +203,23 @@
         auction: this.auction, debt, winner: this.winner, turnCount: this.turnCount, round: this.round, endedByLimit: this.endedByLimit, loans: this.loans,
         log: this.log.slice(-80), logSeq: this.logSeq,
       }));
+    }
+    // ---- saving a whole game to disk and bringing it back (everything, including the hidden card decks)
+    toSave() {
+      const o = {};
+      for (const k of Object.keys(this)) if (k !== 'rng') o[k] = this[k];
+      return JSON.parse(JSON.stringify(o));
+    }
+    static fromSave(data, rng = Math.random) {
+      const g = Object.assign(Object.create(Game.prototype), JSON.parse(JSON.stringify(data)));
+      g.rng = rng;
+      // games saved by an older version still load: fill in anything added since
+      g.rules = { ...RULES, ...g.rules, loans: { ...RULES.loans, ...((g.rules || {}).loans) } };
+      if (!g.loans) g.loans = [];
+      if (g.loanSeq == null) g.loanSeq = g.loans.reduce((m, l) => Math.max(m, l.id), 0);
+      if (g.round == null) g.round = 1;
+      if (g.endedByLimit == null) g.endedByLimit = false;
+      return g;
     }
     static fromSnapshot(snap) {
       const g = Object.create(Game.prototype);
@@ -238,10 +250,7 @@
             this.phase = 'postroll';
           } else {
             this.say(`${p.name} must pay the ${this.money(this.rules.jailFine)} fine and leave jail.`, p.id);
-            this.charge(p, this.rules.jailFine, null, () => {
-              this.releaseFromJail(p);
-              this.step(res, d1 + d2);
-            });
+            this.charge(p, this.rules.jailFine, null, { t: 'jailMove', steps: d1 + d2 });
           }
         }
         return res;
@@ -302,11 +311,11 @@
           const rent = this.rentFor(p.pos, this.lastDice ? this.lastDice[0] + this.lastDice[1] : 7, opts);
           const owner = this.players[st.owner];
           this.say(`${p.name} landed on ${s.name} and owes ${owner.name} ${this.money(rent)} rent.`, p.id);
-          return this.charge(p, rent, owner.id, () => this.afterLand());
+          return this.charge(p, rent, owner.id, AFTER);
         }
         case 'tax':
           this.say(`${p.name} pays ${s.name}: ${this.money(s.amount)}.`, p.id);
-          return this.charge(p, s.amount, null, () => this.afterLand());
+          return this.charge(p, s.amount, null, AFTER);
         case 'gotojail':
           this.say(`${p.name} is sent to jail!`, p.id);
           this.sendToJail(p);
@@ -395,15 +404,16 @@
 
     // ------------------------------------------------------------------ money & debt
     // Pay `amount` to creditor (null = bank). If the player can't afford it the game
-    // enters the 'debt' phase and `resume` runs once they've raised enough money.
-    charge(p, amount, creditorId, resume) {
-      if (amount <= 0) return resume();
+    // enters the 'debt' phase and `then` (see resume) runs once they've raised enough money.
+    // `then` is plain data, not a function, so a game can be saved to disk in the middle of a debt.
+    charge(p, amount, creditorId, then) {
+      if (amount <= 0) return this.resume(then);
       if (p.cash >= amount) {
         p.cash -= amount;
         if (creditorId !== null) this.players[creditorId].cash += amount;
-        return resume();
+        return this.resume(then);
       }
-      this.debt = { pid: p.id, amount, creditor: creditorId, resume, prevPhase: this.phase };
+      this.debt = { pid: p.id, amount, creditor: creditorId, then, prevPhase: this.phase };
       this.phase = 'debt';
       this.say(`${p.name} owes ${this.money(amount)} but only has ${this.money(p.cash)}. Raise funds or go bankrupt!`, p.id);
     }
@@ -418,7 +428,32 @@
       if (d.creditor !== null) this.players[d.creditor].cash += d.amount;
       this.say(`${p.name} settles the debt of ${this.money(d.amount)}.`, p.id);
       this.phase = d.prevPhase;
-      d.resume();
+      this.resume(d.then);
+    }
+
+    // What to do once a payment has been made:
+    //   { t:'after' }                    finish the landing and move on
+    //   { t:'jailMove', steps }          the jail fine is paid: leave jail and move `steps`
+    //   { t:'payEach', amt, ids, k }     a card makes you pay every other player; the next one is ids[k]
+    //   { t:'installment', ids, k, loanId, principal }   a bank payment is made; then the next loan
+    resume(t) {
+      const p = this.cur();
+      switch (t.t) {
+        case 'after': return this.afterLand();
+        case 'jailMove': this.releaseFromJail(p); return this.step(this.lastRoll, t.steps);
+        case 'payEach':
+          if (t.k >= t.ids.length) return this.afterLand();
+          return this.charge(p, t.amt, t.ids[t.k], { t: 'payEach', amt: t.amt, ids: t.ids, k: t.k + 1 });
+        case 'installment': {
+          const l = this.loans.find((x) => x.id === t.loanId);
+          if (l) {
+            l.remaining -= t.principal;
+            if (l.remaining <= 0) { this.loans = this.loans.filter((x) => x !== l); this.say(`${p.name}'s ${this.money(l.principal)} loan is paid off.`, p.id); }
+          }
+          return this.nextInstallment(t.ids, t.k + 1);
+        }
+        default: throw new Error('Unknown continuation ' + t.t);
+      }
     }
 
     declareBankruptcy(pid) {
@@ -553,11 +588,10 @@
           p.pos = (p.pos - card.n + 40) % 40;
           return this.land();
         case 'gain': p.cash += card.amt; return done();
-        case 'pay': return this.charge(p, card.amt, null, done);
+        case 'pay': return this.charge(p, card.amt, null, AFTER);
         case 'payEach': {
-          const others = this.alive().filter((q) => q.id !== p.id);
-          const payNext = (k) => (k >= others.length ? done() : this.charge(p, card.amt, others[k].id, () => payNext(k + 1)));
-          return payNext(0);
+          const ids = this.alive().filter((q) => q.id !== p.id).map((q) => q.id);
+          return this.resume({ t: 'payEach', amt: card.amt, ids, k: 0 });
         }
         case 'gainEach':
           for (const q of this.alive()) {
@@ -573,7 +607,7 @@
             total += h === 5 ? card.hotel : h * card.house;
           }
           this.say(`${p.name}'s repair bill is ${this.money(total)}.`, p.id);
-          return this.charge(p, total, null, done);
+          return this.charge(p, total, null, AFTER);
         }
         case 'jail':
           this.sendToJail(p);

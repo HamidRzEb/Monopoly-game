@@ -5,3 +5,4 @@ node_modules/
 # Windows download markers
 *:Zone.Identifier
 *.Identifier
+data/

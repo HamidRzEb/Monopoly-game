@@ -32,6 +32,15 @@ The server must be reachable by your friends. Easiest options:
   `npm start`; it listens on `$PORT`. A `Dockerfile` is included.
   Game state lives in server memory, so run a single instance (restarting ends games).
 
+## Saved games
+
+Games are saved to disk (`data/rooms/<CODE>.json`, one file per room, about a second after every change and again
+when the server is stopped) and loaded again at startup. Restarting or updating the server therefore doesn't end
+games: players' browsers reconnect by themselves with the keys they already hold, and the bots pick up where they left off.
+A game nobody is in is kept for 72 hours, a finished one for 1 hour, an empty lobby for 10 minutes. A pending trade offer
+is not kept. The files hold players' secret keys, so they're private (`0600`) and git-ignored. Settings: `DATA_DIR`,
+`GAME_KEEP_HOURS`, `PERSIST=off`.
+
 ## Rejoining a game
 
 Your seat is tied to a secret key that the browser remembers for 24 hours, so closing the tab or restarting the

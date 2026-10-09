@@ -10,3 +10,4 @@ docs
 # the raw sprite sheets are only needed to re-cut icons, not at runtime
 assets/Gemini_Generated_Image_*.jpg
 assets/inverted-dice-*.svg
+data

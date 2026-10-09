@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { Game } = require('./js/engine.js');
+const { createStore } = require('./js/store.js');
 const AI = require('./js/ai.js');
 const { TOKENS, PLAYER_COLORS, BOT_NAMES, RULES, SPEEDS } = require('./js/data.js');
 const DEFAULT_SETTINGS = { maxRounds: RULES.maxRounds, speed: 'relaxed' };
@@ -20,9 +21,79 @@ const MAX_ROOMS = 500;
 const SPEED = Number(process.env.BOT_SPEED) || 1; // tests set this high to skip bot thinking time
 const TAKEOVER_MS = 45 * 1000;       // a disconnected player's turn is played by a bot after this long
 const TRADE_TIMEOUT_MS = 60 * 1000;  // unanswered trade offers expire
-const ROOM_IDLE_MS = 10 * 60 * 1000; // rooms with no connected humans are deleted after this long
+const ROOM_IDLE_MS = 10 * 60 * 1000; // a lobby with no connected humans is deleted after this long (games are kept much longer, see below)
 
 const rooms = new Map();
+
+// ---------------------------------------------------------------- saving games to disk
+// Every room (lobby or game) is written to DATA_DIR/rooms/<CODE>.json shortly after it changes and reloaded
+// when the server starts, so restarts and updates don't end games. Players reconnect with the keys they
+// already hold. Set PERSIST=off to disable, GAME_KEEP_HOURS to change how long unattended games are kept.
+const GAME_KEEP_MS = (Number(process.env.GAME_KEEP_HOURS) || 72) * 60 * 60 * 1000; // a game nobody is in
+const FINISHED_KEEP_MS = 60 * 60 * 1000;                                           // a finished game nobody is in
+const SAVE_DELAY_MS = 1000;
+let store = null; // set at startup (not when the module is imported by tests)
+
+const keepLimit = (room) => (!room.game ? ROOM_IDLE_MS : room.game.phase === 'gameover' ? FINISHED_KEEP_MS : GAME_KEEP_MS);
+
+function serializeRoom(room) {
+  return {
+    version: 1,
+    code: room.code,
+    host: room.host,
+    settings: room.settings,
+    lastActivity: Math.floor(room.lastActivity / 60000) * 60000, // to the minute, so idle rooms don't rewrite the file
+    seats: room.seats.map((s) => ({ name: s.name, type: s.type, token: s.token, key: s.key, local: !!s.local, rejoinable: !!s.rejoinable })),
+    game: room.game ? room.game.toSave() : null,
+  };
+}
+function scheduleSave(room) {
+  if (!store || !store.enabled || room.saveTimer || room.destroyed) return;
+  room.saveTimer = setTimeout(() => {
+    room.saveTimer = null;
+    if (room.destroyed) return;
+    store.save(room.code, serializeRoom(room)).catch((e) => console.error(`could not save room ${room.code}:`, e.message));
+  }, SAVE_DELAY_MS);
+  room.saveTimer.unref();
+}
+// On shutdown: write every room right now (a pending 1-second save must not be lost).
+function flushAll() {
+  if (!store || !store.enabled) return 0;
+  let n = 0;
+  for (const room of rooms.values()) {
+    clearTimeout(room.saveTimer); room.saveTimer = null;
+    try { store.saveSync(room.code, serializeRoom(room)); n++; } catch (e) { console.error(`could not save room ${room.code}:`, e.message); }
+  }
+  return n;
+}
+function restoreRooms() {
+  if (!store || !store.enabled) return 0;
+  let n = 0;
+  for (const { code, record: rec } of store.loadAll()) {
+    try {
+      if (rec.version !== 1 || rec.code !== code || !Array.isArray(rec.seats) || !rec.seats.length) throw new Error('unrecognised format');
+      const game = rec.game ? Game.fromSave(rec.game) : null;
+      if (game && game.players.length !== rec.seats.length) throw new Error('seats do not match players');
+      const idleFor = Date.now() - (rec.lastActivity || 0);
+      const room = {
+        code, host: Math.min(Math.max(rec.host | 0, 0), rec.seats.length - 1), game, snapshot: game ? game.snapshot() : null,
+        trade: null, botTimer: null, saveTimer: null, lastActivity: Date.now(),
+        settings: { ...DEFAULT_SETTINGS, ...(rec.settings || {}) },
+        seats: rec.seats.map((s) => ({
+          name: String(s.name), type: s.type === 'bot' ? 'bot' : 'human', token: s.token, key: s.key || null,
+          local: !!s.local, rejoinable: !!s.rejoinable, streams: new Set(), connected: s.type === 'bot', lastSeen: Date.now(),
+        })),
+      };
+      if (idleFor > keepLimit(room)) { store.remove(code); continue; } // too old to be worth keeping
+      rooms.set(code, room);
+      n++;
+    } catch (e) {
+      console.error(`Saved room ${code} could not be restored (${e.message}); set aside as .bad`);
+      store.quarantine(code);
+    }
+  }
+  return n;
+}
 
 // ---------------------------------------------------------------- abuse protection
 // Behind a reverse proxy (Caddy/nginx) set TRUST_PROXY=1 so the real client IP is read from
@@ -205,6 +276,7 @@ function viewFor(room, you) {
 
 function broadcast(room) {
   room.lastActivity = Date.now();
+  scheduleSave(room);
   if (room.game) room.snapshot = room.game.snapshot();
   const done = new Set();
   room.seats.forEach((seat, i) => {
@@ -358,7 +430,10 @@ function roomInfo(room, key) {
 
 const routes = {
   'POST /api/create'(body, ctx) {
-    if (rooms.size >= MAX_ROOMS) fail('The server is full. Try again later.', 503);
+    if (rooms.size >= MAX_ROOMS) { // make space by dropping the longest-abandoned room nobody is in
+      const idle = [...rooms.values()].filter((r) => !connectedHumans(r).length).sort((a, b) => a.lastActivity - b.lastActivity)[0];
+      if (idle) destroyRoom(idle); else fail('The server is full. Try again later.', 503);
+    }
     const room = { code: newCode(), seats: [], host: 0, game: null, snapshot: null, trade: null, botTimer: null, lastActivity: Date.now(), settings: { ...DEFAULT_SETTINGS } };
     const seat = makeSeat(room, { name: clean(body.name, 'Player'), type: 'human' });
     room.seats.push(seat);
@@ -366,6 +441,7 @@ const routes = {
     const locals = Array.isArray(body.locals) ? body.locals.slice(0, RULES.maxPlayers - 1) : [];
     for (const n of locals) addLocalSeat(room, seat.key, clean(n, 'Player'));
     rooms.set(room.code, room);
+    scheduleSave(room);
     return { room: room.code, key: seat.key };
   },
 
@@ -625,6 +701,9 @@ function ensureHost(room) {
 
 function destroyRoom(room) {
   clearTimeout(room.botTimer);
+  clearTimeout(room.saveTimer);
+  room.destroyed = true;
+  if (store) store.remove(room.code);
   for (const s of room.seats) for (const res of s.streams) res.end();
   rooms.delete(room.code);
 }
@@ -746,7 +825,7 @@ const server = http.createServer(async (req, res) => {
         const keep = Object.entries(req.headers).filter(([k]) => /^(x-|ar-|cf-|forwarded|via|true-client|client-ip|cdn)/.test(k));
         console.log('DEBUG_HEADERS peer=' + req.socket.remoteAddress + ' resolved=' + clientIp(req) + ' ' + JSON.stringify(Object.fromEntries(keep)));
       }
-      return send(200, { ok: true, rooms: rooms.size });
+      return send(200, { ok: true, rooms: rooms.size, saving: !!(store && store.enabled) });
     }
     const route = routes[`${req.method} ${url.pathname}`];
     if (route) {
@@ -778,13 +857,20 @@ setInterval(() => {
       }
     }
     const hostChanged = ensureHost(room);
-    if (!connectedHumans(room).length && Date.now() - room.lastActivity > ROOM_IDLE_MS) destroyRoom(room);
+    if (!connectedHumans(room).length && Date.now() - room.lastActivity > keepLimit(room)) destroyRoom(room);
     else if (hostChanged) broadcast(room);
   }
 }, 15000).unref();
 
 if (require.main === module) {
+  if (process.env.PERSIST !== 'off') {
+    store = createStore(process.env.DATA_DIR || path.join(ROOT, 'data'));
+    const n = restoreRooms();
+    if (store.enabled) console.log(`Saving games to ${store.dir}${n ? ` (restored ${n} room${n === 1 ? '' : 's'})` : ''}`);
+  }
   server.listen(PORT, () => console.log(`Game server running on http://localhost:${PORT}`));
-  process.on('SIGTERM', () => process.exit(0));
+  const shutdown = () => { const n = flushAll(); if (n) console.log(`Saved ${n} room${n === 1 ? '' : 's'} before exiting`); process.exit(0); };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown); // pm2 restart/stop sends SIGINT
 }
 module.exports = { server, rooms, makeClientIpResolver };

@@ -64,6 +64,9 @@ Start on boot, three ways:
 | `CLIENT_IP_HEADER` | unset | Header the proxy **overwrites** with the visitor's address (ArvanCloud: `ar-real-ip`). Without it, `X-Forwarded-For` is used, counting `TRUST_PROXY` hops from the right. |
 | `TRUSTED_PROXY_CIDRS` | unset | Comma-separated proxy address ranges. Visitor headers are only believed when the connection comes from one of them, so nobody can fake them by calling the server directly. The ArvanCloud ranges are in `deploy/arvancloud-ips.txt` (`ecosystem.config.js` loads them). |
 | `DEBUG_HEADERS` | unset | Set to `1` to log the proxy headers (and the address the game derived) on `/api/health` requests, for setting up a CDN. |
+| `DATA_DIR` | `./data` | Where games are saved (`<DATA_DIR>/rooms/*.json`). Must be writable; if it isn't, saving is switched off and the server says so at startup. Back it up or keep it across deploys: it is what lets a restart keep games alive. Under Docker, mount a volume here. |
+| `GAME_KEEP_HOURS` | 72 | How long a game nobody is in is kept before it is deleted. |
+| `PERSIST` | on | `off` disables saving. |
 | `LIMIT_CREATE` | 20 | New rooms per IP per 10 minutes |
 | `LIMIT_JOIN` | 60 | Join attempts per IP per 10 minutes |
 | `LIMIT_API` | 2400 | Other requests per IP per minute |
