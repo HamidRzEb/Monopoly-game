@@ -1,0 +1,19 @@
+# Start pm2 (and everything saved with `pm2 save`) at boot WITHOUT root.
+# Needs lingering:  loginctl enable-linger $USER
+# Install:  mkdir -p ~/.config/systemd/user && cp deploy/pm2-user.service ~/.config/systemd/user/pm2.service
+#           systemctl --user daemon-reload && systemctl --user enable --now pm2.service
+[Unit]
+Description=PM2 process manager (user)
+After=network.target
+
+[Service]
+Type=forking
+Environment=PM2_HOME=%h/.pm2
+PIDFile=%h/.pm2/pm2.pid
+Restart=on-failure
+ExecStart=/usr/local/bin/pm2 resurrect
+ExecReload=/usr/local/bin/pm2 reload all
+ExecStop=/usr/local/bin/pm2 kill
+
+[Install]
+WantedBy=default.target

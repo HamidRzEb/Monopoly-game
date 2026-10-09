@@ -34,6 +34,24 @@ Put any reverse proxy with HTTPS in front (Caddy, nginx, Cloudflare Tunnel). For
 work through the proxy, response buffering must be off for `/api/events`
 (Caddy: `flush_interval -1`, already in `deploy/Caddyfile`; nginx: `proxy_buffering off;`).
 
+## Option C: pm2
+
+With Node and [pm2](https://pm2.keymetrics.io) installed (no Docker or root needed):
+
+```bash
+git clone <your-repo-url> tycoon && cd tycoon
+pm2 start ecosystem.config.js     # starts "tycoon" on port 3000
+pm2 save                          # remember it for restarts
+```
+
+Everyday use: `pm2 status`, `pm2 logs tycoon`, `pm2 restart tycoon`, `pm2 stop tycoon`.
+Update: `cd tycoon && git pull && pm2 restart tycoon` (this ends games in progress).
+
+The config forces a single process, because games live in memory. To change the port or set
+`TRUST_PROXY`, edit `ecosystem.config.js` and run `pm2 restart tycoon --update-env`.
+Start on boot: `pm2 startup` (prints one command to run with sudo), or see
+`deploy/pm2-user.service` for a no-root user-level alternative.
+
 ## Settings (environment variables)
 
 | Variable | Default | Meaning |
