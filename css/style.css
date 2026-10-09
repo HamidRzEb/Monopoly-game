@@ -123,7 +123,6 @@ h1, h2, h3 { margin: 0 0 .4em; }
 .side-corner .ticon { font-size: 2.6em; height: 5.6em; width: 100%; }
 .side-corner .tname { font-size: .85em; }
 .side-corner .tbody { justify-content: space-between; padding: .5em .3em; }
-.owned { outline: .3em solid var(--owner); outline-offset: -.3em; }
 .mort-mark { display: none; }
 .mort-img img { width: 100%; display: block; }
 .mortgaged { filter: grayscale(.7); }
@@ -419,3 +418,37 @@ h1, h2, h3 { margin: 0 0 .4em; }
 .length-row .muted { font-size: .85rem; }
 .round-tag { color: var(--muted); font-weight: 600; }
 .round-tag.hurry { color: #c62828; font-weight: 800; animation: cardpulse 1.4s infinite; }
+
+/* ---------- ownership tag: a small pill in the owner's colour, tucked in a free corner so it never covers names or art */
+.owner-tag { display: none; position: absolute; width: 1.7em; height: .8em; border-radius: .45em; background: var(--owner); border: .14em solid #fff; box-shadow: 0 0 0 .08em #0007, 0 1px 3px #0005; z-index: 2; pointer-events: none; bottom: .3em; right: .3em; }
+.owned .owner-tag { display: block; }
+.side-left .owner-tag { right: auto; left: .3em; }
+.side-top.type-property .owner-tag { bottom: calc(17% + .3em); }
+
+/* ---------- turn banner (middle of the board) */
+.banner-slot { position: absolute; left: 0; right: 0; top: 7%; display: flex; justify-content: center; pointer-events: none; z-index: 3; }
+.turn-banner { display: flex; align-items: center; gap: .6em; background: #fff; border: .25em solid var(--c); border-radius: 99em; padding: .35em 1.2em .35em .5em; font-size: calc(var(--b) / 38); font-weight: 800; box-shadow: 0 6px 18px #0004; animation: bannerin 1.7s ease-out forwards; }
+.turn-banner .icon { width: 2.1em; height: 2.1em; border-radius: 50%; background: #fff; border: .18em solid var(--c); display: grid; place-items: center; }
+.turn-banner .icon img { width: 100%; height: 100%; object-fit: contain; padding: 10%; }
+@keyframes bannerin { 0% { transform: translateY(-1.2em) scale(.7); opacity: 0; } 12% { transform: none; opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; transform: translateY(.4em); } }
+
+/* ---------- recap, speed, bank */
+.recap { background: #fff9e6; border: 1px solid #f0dc9a; border-radius: 10px; padding: 6px 10px; margin: 0 0 8px; max-height: 190px; overflow: auto; }
+.recap-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.recap-line { font-size: .86em; padding: 1px 0; color: #4a4636; }
+.recap-line.mine { font-weight: 700; color: #1d2733; background: #ffeeb0; border-radius: 4px; padding: 1px 4px; }
+.speed-select { width: auto; padding: .2em .4em; font-size: .85rem; }
+#speedbox { display: inline-flex; align-items: center; }
+.bank h3 { margin: 14px 0 6px; }
+.bank-credit { margin: 6px 0 8px; font-size: 1.05em; }
+.bank-amounts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.bank-amount { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: .6em .3em; border: 1px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; }
+.bank-amount:hover:not(:disabled) { background: #eef6ff; border-color: var(--accent); }
+.bank-amount:disabled { opacity: .4; cursor: not-allowed; }
+.bank-amount small { color: var(--muted); font-size: .72rem; }
+.loan { background: #f6f8fa; border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
+.loan-top { display: flex; justify-content: space-between; gap: 10px; }
+.loan .input { width: 90px; padding: .25em .4em; }
+@media (max-width: 900px) { .bank-amounts { grid-template-columns: repeat(2, 1fr); } }
+.topbar { flex-wrap: wrap; row-gap: 4px; }
+.room-tag { white-space: nowrap; }

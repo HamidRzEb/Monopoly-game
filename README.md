@@ -32,6 +32,20 @@ The server must be reachable by your friends. Easiest options:
   `npm start`; it listens on `$PORT`. A `Dockerfile` is included.
   Game state lives in server memory, so run a single instance (restarting ends games).
 
+## The bank
+
+Players can borrow from the bank during their own turn (the **Bank** button). The bank lends up to half
+of what you own (max $2,000, 3 loans at a time, $100 steps). At the start of each of your turns you pay a
+fifth of each loan back plus 5% interest on what you still owe; you can also repay any amount early, which
+saves interest. Unaffordable payments follow the normal debt rules (sell, mortgage, or go bankrupt), money
+owed counts against your net worth, and a bankrupt player's loans are written off. Terms are in `js/data.js`.
+
+## Game speed and keeping track
+
+The host picks **Relaxed / Normal / Fast** (lobby, or any time in the game from the top bar). It controls how
+long bots pause, and how long dice, walking and card animations take. A banner announces whose turn it is,
+and when it becomes your turn a **While you were away** card recaps what everyone else did.
+
 ## Game length
 
 Games can't run forever: the host picks a length in the lobby (Quick 60 / Standard 120 / Long 200

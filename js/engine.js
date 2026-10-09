@@ -47,6 +47,8 @@
       this.turnCount = 1;
       this.round = 1;
       this.endedByLimit = false;
+      this.loans = [];   // { id, owner, principal, remaining, step }
+      this.loanSeq = 0;
       this.log = [];
       this.logSeq = 0;
       this.say(`${this.cur().name} goes first.`, 0);
@@ -92,7 +94,8 @@
       }
       return v;
     }
-    netWorth(pid) {
+    // Everything a player owns (cash + properties + buildings), before subtracting what they owe the bank.
+    assetWorth(pid) {
       let v = this.players[pid].cash;
       for (const i of this.ownedBy(pid)) {
         const st = this.props[i];
@@ -100,6 +103,83 @@
         v += st.houses * (SPACES[i].houseCost || 0);
       }
       return v;
+    }
+    // Net worth is what decides the winner when time runs out, so money owed to the bank counts against you.
+    netWorth(pid) { return this.assetWorth(pid) - this.debtOf(pid); }
+
+    // ------------------------------------------------------------------ the bank
+    loansOf(pid) { return this.loans.filter((l) => l.owner === pid); }
+    debtOf(pid) { return this.loansOf(pid).reduce((s, l) => s + l.remaining, 0); }
+    // The most the bank will lend right now: a fraction of what you own, capped, minus what you already owe.
+    creditAvailable(pid) {
+      const c = this.rules.loans;
+      const limit = Math.min(c.creditCap, Math.floor((c.creditFraction * this.assetWorth(pid)) / c.step) * c.step);
+      return Math.max(0, limit - this.debtOf(pid));
+    }
+    // What the next round's payment on a loan will be: a slice of the principal plus interest on the balance.
+    interestDue(l) { return Math.ceil(l.remaining * this.rules.loans.rate); }
+    paymentDue(l) { return Math.min(l.step, l.remaining) + this.interestDue(l); }
+
+    canBorrow(pid, amount) {
+      const c = this.rules.loans;
+      if (!this.canManage(pid)) return "You can only use the bank during your own turn.";
+      if (!Number.isInteger(amount) || amount < c.min || amount % c.step !== 0) return `Loans are in steps of ${this.money(c.step)}, from ${this.money(c.min)}.`;
+      if (this.loansOf(pid).length >= c.maxActive) return `You can have at most ${c.maxActive} loans at once.`;
+      const room = this.creditAvailable(pid);
+      if (amount > room) return room >= c.min ? `The bank will lend you at most ${this.money(room)} right now.` : 'The bank will not lend you any more right now.';
+      return null;
+    }
+    borrow(pid, amount) {
+      const err = this.canBorrow(pid, amount);
+      if (err) throw new Error(err);
+      const c = this.rules.loans, p = this.players[pid];
+      p.cash += amount;
+      this.loans.push({ id: ++this.loanSeq, owner: pid, principal: amount, remaining: amount, step: Math.ceil(amount / c.rounds) });
+      this.say(`${p.name} borrows ${this.money(amount)} from the bank.`, pid);
+      this.checkDebt(); // a loan can be used to settle a debt
+    }
+
+    canRepay(pid, loanId, amount) {
+      const l = this.loans.find((x) => x.id === loanId);
+      if (!this.canManage(pid) || this.phase === 'debt') return "You can only repay during your own turn.";
+      if (!l || l.owner !== pid) return 'No such loan.';
+      if (!Number.isInteger(amount) || amount < 1) return 'Enter an amount to repay.';
+      if (amount > l.remaining) return `You only owe ${this.money(l.remaining)} on this loan.`;
+      if (amount > this.players[pid].cash) return 'Not enough cash.';
+      return null;
+    }
+    repay(pid, loanId, amount) {
+      const err = this.canRepay(pid, loanId, amount);
+      if (err) throw new Error(err);
+      const l = this.loans.find((x) => x.id === loanId), p = this.players[pid];
+      p.cash -= amount;
+      l.remaining -= amount;
+      if (l.remaining <= 0) {
+        this.loans = this.loans.filter((x) => x !== l);
+        this.say(`${p.name} pays off a ${this.money(l.principal)} loan.`, pid);
+      } else {
+        this.say(`${p.name} repays ${this.money(amount)} to the bank (${this.money(l.remaining)} still owed).`, pid);
+      }
+    }
+
+    // At the start of each of their turns a player pays one slice of every loan, plus interest.
+    // If they can't afford it the normal debt rules apply (sell/mortgage, or go bankrupt).
+    collectInstallments() {
+      const p = this.cur();
+      const mine = this.loansOf(p.id);
+      const next = (k) => {
+        if (k >= mine.length) return;
+        const l = mine[k];
+        if (!this.loans.includes(l)) return next(k + 1);
+        const principal = Math.min(l.step, l.remaining), interest = this.interestDue(l);
+        this.say(`${p.name}'s bank payment is due: ${this.money(principal + interest)} (${this.money(interest)} interest).`, p.id);
+        this.charge(p, principal + interest, null, () => {
+          l.remaining -= principal;
+          if (l.remaining <= 0) { this.loans = this.loans.filter((x) => x !== l); this.say(`${p.name}'s ${this.money(l.principal)} loan is paid off.`, p.id); }
+          next(k + 1);
+        });
+      };
+      next(0);
     }
 
     rentFor(i, diceSum, opts = {}) {
@@ -125,7 +205,7 @@
         current: this.current, phase: this.phase, doubles: this.doubles, rolledDoubles: this.rolledDoubles,
         lastDice: this.lastDice, lastRoll: this.lastRoll, rollSeq: this.rollSeq,
         lastCard: this.lastCard, cardSeq: this.cardSeq,
-        auction: this.auction, debt, winner: this.winner, turnCount: this.turnCount, round: this.round, endedByLimit: this.endedByLimit,
+        auction: this.auction, debt, winner: this.winner, turnCount: this.turnCount, round: this.round, endedByLimit: this.endedByLimit, loans: this.loans,
         log: this.log.slice(-80), logSeq: this.logSeq,
       }));
     }
@@ -276,6 +356,7 @@
         if (left === 10) this.say(`10 rounds left! When time runs out the richest player wins.`);
         else if (left === 1) this.say('Final round! The richest player wins when it ends.');
       }
+      this.collectInstallments();
     }
 
     // Time's up: the player with the highest net worth (cash + properties + buildings) wins.
@@ -345,6 +426,7 @@
       const p = this.cur();
       const creditor = this.debt.creditor;
       this.say(`${p.name} is bankrupt!${creditor !== null ? ` Everything goes to ${this.players[creditor].name}.` : ''}`, p.id);
+      this.loans = this.loans.filter((l) => l.owner !== p.id); // the bank writes off what they owed
       for (const i of this.ownedBy(p.id)) {
         const st = this.props[i];
         if (st.houses === 5) this.hotelsLeft++; else this.housesLeft += st.houses;

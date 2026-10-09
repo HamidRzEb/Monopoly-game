@@ -201,6 +201,35 @@ async function cutStreet(id, [row, col]) {
   fs.writeFileSync(path.join(ASSETS, 'icons', id + '.png'), png);
 }
 
+// The Start tile's arrow points right, but pieces travel LEFT along the bottom row. Mirror only the
+// arrow (the "GO" lettering must stay readable). Coordinates are for the 256x236 trimmed icon.
+async function fixGoArrow() {
+  const file = path.join(ASSETS, 'icons', 'go.png');
+  const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { width: w, height: h } = info;
+  if (w !== 256 || h !== 236) { console.warn(`go.png is ${w}x${h}, expected 256x236: arrow not flipped`); return; }
+  // The lettering's pointed bottom tip dips into the arrow's top edge (a V from x 88-117 at y 168, closing by y ~181): keep it.
+  const isTip = (x, y) => y >= 168 && y <= 181 && x >= 88 + (y - 167) && x <= 117 - (y - 167);
+  const isArrow = (x, y) => !isTip(x, y) && (y >= 168 || (y >= 158 && x >= 170)); // shaft/tail + the head's tip beside the lettering
+  const out = Buffer.alloc(data.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = (y * w + x) * 4;
+      if (isArrow(x, y)) continue; // arrow pixels are placed mirrored below
+      data.copy(out, i, i, i + 4);
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!isArrow(x, y)) continue;
+      const src = (y * w + x) * 4, dst = (y * w + (w - 1 - x)) * 4;
+      if (data[src + 3] > 0) data.copy(out, dst, src, src + 4);
+    }
+  }
+  await sharp(out, { raw: { width: w, height: h, channels: 4 } }).png().toFile(file);
+  console.log('mirrored the Go arrow so it points the way pieces travel');
+}
+
 (async () => {
   for (const [box, outs] of UI_CUTS) await cut(SHEET_UI, box, outs, { test: isDarkBg });
   await cut(SHEET_UI, [685, 5, 1315, 265], ['logo'], { maxSize: 700, test: isLogoBg, keepParts: false, pockets: false });
@@ -213,5 +242,6 @@ async function cutStreet(id, [row, col]) {
     await cut(SHEET_ICONS, [COLS[c] - HALF, ROWS[r][0], COLS[c] + HALF, ROWS[r][1]], outs);
   }
   for (const [out, box] of CARDS) await cut(SHEET_CARDS, box, [out], { maxSize: 900, keepParts: false, eraseLines: true });
+  await fixGoArrow();
   console.log('sliced', ICONS.length, 'icons and', CARDS.length, 'card templates');
 })();

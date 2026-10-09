@@ -25,10 +25,19 @@ function invariants(g) {
   assert.strictEqual(houses + g.housesLeft, g.rules.housesTotal, 'house supply mismatch');
   assert.strictEqual(hotels + g.hotelsLeft, g.rules.hotelsTotal, 'hotel supply mismatch');
   for (const p of g.players) assert(p.cash >= 0, `${p.name} has negative cash`);
+  const c = g.rules.loans;
+  for (const l of g.loans) {
+    assert(!g.players[l.owner].bankrupt, 'bankrupt player still has a loan');
+    assert(l.remaining > 0 && l.remaining <= l.principal, 'loan balance out of range');
+  }
+  for (const p of g.players) {
+    assert(g.loansOf(p.id).length <= c.maxActive, 'too many loans');
+    if (!p.bankrupt) assert.strictEqual(g.netWorth(p.id), g.assetWorth(p.id) - g.debtOf(p.id), 'net worth must subtract loans');
+  }
 }
 
 const N = Number(process.argv[2]) || 200;
-let finished = 0, totalSteps = 0, maxSteps = 0, limited = 0;
+let finished = 0, totalSteps = 0, maxSteps = 0, limited = 0, borrowed = 0;
 const STEP_CAP = 60000;
 for (let seed = 1; seed <= N; seed++) {
   const count = 2 + (seed % 7);
@@ -44,7 +53,9 @@ for (let seed = 1; seed <= N; seed++) {
         && AI.evaluateTrade(g, offer.to, offer.get, offer.give)) {
       g.executeTrade(p.id, offer.to, offer.give, offer.get);
     }
+    const before = g.loans.length;
     AI.act(g);
+    if (g.loans.length > before) borrowed++;
     if (steps % 25 === 0) invariants(g);
     steps++;
   }
@@ -61,6 +72,7 @@ for (let seed = 1; seed <= N; seed++) {
   }
   totalSteps += steps; maxSteps = Math.max(maxSteps, steps);
 }
+console.log(`bots took ${borrowed} loans`);
 console.log(`${finished}/${N} games finished (${limited} by the round limit); avg ${Math.round(totalSteps / N)} bot actions, max ${maxSteps}`);
 assert.strictEqual(finished, N, 'every game must finish now that there is a round limit');
 console.log('simulation OK');

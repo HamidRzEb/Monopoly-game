@@ -23,6 +23,16 @@
     // Games can't run forever: after this many rounds (everyone has had a turn) the richest player wins.
     maxRounds: 120,
     roundOptions: [60, 120, 200], // choices offered to the host in the lobby
+    // The bank: each loan is paid back in `rounds` equal parts of the principal, one per round, plus
+    // `rate` interest on whatever you still owe, charged at the start of each of your turns.
+    loans: { rate: 0.05, rounds: 5, step: 100, min: 100, maxActive: 3, creditFraction: 0.5, creditCap: 2000 },
+  };
+
+  // Pace of the game. `bot` scales how long bots pause between actions, `anim` the dice/walking/card animations.
+  const SPEEDS = {
+    relaxed: { label: 'Relaxed', bot: 1.8, anim: 1.5 },
+    normal: { label: 'Normal', bot: 1, anim: 1 },
+    fast: { label: 'Fast', bot: 0.5, anim: 0.7 },
   };
 
   const COLORS = {
@@ -138,7 +148,7 @@
 
   const BOT_NAMES = ['Ada', 'Bolt', 'Cleo', 'Dex', 'Echo', 'Fizz', 'Gizmo', 'Hexa', 'Iris', 'Juno', 'Koda', 'Luna'];
 
-  const DATA = { THEME, RULES, COLORS, SPACES, CARDS, TOKENS, PLAYER_COLORS, BOT_NAMES };
+  const DATA = { THEME, RULES, SPEEDS, COLORS, SPACES, CARDS, TOKENS, PLAYER_COLORS, BOT_NAMES };
   if (typeof module !== 'undefined' && module.exports) module.exports = DATA;
   else root.MonopolyData = DATA;
 })(typeof window !== 'undefined' ? window : globalThis);

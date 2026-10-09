@@ -2,7 +2,7 @@
 // and sends the player's intents to the server.
 (function () {
   'use strict';
-  const { SPACES, COLORS, TOKENS, THEME } = window.MonopolyData;
+  const { SPACES, COLORS, TOKENS, THEME, SPEEDS } = window.MonopolyData;
   const { Game } = window.MonopolyEngine;
   const { h, money, icon, openModal, closeModal, refreshModal, redrawModal, modalKind, toast, sleep } = window.U;
   const app = document.getElementById('app');
@@ -184,6 +184,9 @@
             v.roundOptions.map((n) => h('option', { value: n, selected: n === v.settings.maxRounds }, `${lengthName(n)} (${n} rounds)`)))
           : h('b', {}, `${lengthName(v.settings.maxRounds)} (${v.settings.maxRounds} rounds)`),
         h('span', { class: 'muted' }, 'When time runs out, the richest player wins.')),
+      h('div', { class: 'length-row' }, h('span', {}, 'Game speed'),
+        isHost ? speedSelect() : h('b', {}, SPEEDS[v.settings.speed].label),
+        h('span', { class: 'muted' }, 'How fast bots play and animations run. The host can change it during the game too.')),
       isHost
         ? h('div', { class: 'row' },
           h('button', { class: 'btn', disabled: full, onclick: () => lobby('addBot') }, '+ Add bot'),
@@ -248,22 +251,26 @@
         if (S.game.cardSeq !== S.seenCard) {
           S.seenCard = S.game.cardSeq;
           const c = S.game.lastCard;
-          if (c) { Sfx.play('card', { deck: c.deck }); Board.showCard(c, S.game.players[c.player].name); }
+          if (c) { Sfx.play('card', { deck: c.deck }); Board.showCard(c, S.game.players[c.player].name, 4800 * animScale()); }
         }
         renderGame();
       } while (S.dirty);
     } finally { S.syncing = false; }
   }
 
+  // Dice / walking / card timings follow the room's game speed (Relaxed / Normal / Fast).
+  const animScale = () => (SPEEDS[(S.view && S.view.settings && S.view.settings.speed)] || SPEEDS.normal).anim;
+
   async function animateRoll(res) {
     if (!res) return;
     Sfx.play('dice');
-    await Board.rollAnimation(res.dice);
+    const scale = animScale();
+    await Board.rollAnimation(res.dice, scale);
     if (res.steps > 0 && !document.hidden) {
       for (let k = 1; k <= res.steps; k++) {
         S.anim[res.player] = (res.from + k) % 40;
         Board.renderTokens(S.game, S.anim, res.player);
-        await sleep(110);
+        await sleep(110 * scale);
       }
     }
     delete S.anim[res.player];
@@ -277,6 +284,7 @@
       h('aside', { class: 'side' },
         h('div', { class: 'topbar' },
           h('span', { class: 'room-tag' }, 'Room ', h('b', {}, S.view.code), h('span', { id: 'round', class: 'round-tag' })),
+          h('span', { id: 'speedbox' }),
           h('button', { class: 'btn small', onclick: copyInvite }, 'Invite'),
           h('button', { class: 'btn small ghost', onclick: leave }, 'Leave')),
         h('div', { id: 'players', class: 'players' }),
@@ -290,11 +298,14 @@
     S.layoutBuilt = true;
     S.shownOver = false;
     S.prevCash = {}; S.prevJail = {}; S.prevOwners = null; S.shownDeeds = null; S.lastYou = undefined;
+    S.turnEnd = {}; S.lastCurrent = undefined; S.recapTurn = -1; S.recapOpen = false; S.recap = []; S.speedShown = null;
   }
 
   function renderGame() {
     const g = S.game;
     Board.render(g, S.anim);
+    trackTurns(g);
+    renderSpeed();
     renderPlayers();
     renderRound();
     renderPanel();
@@ -313,6 +324,47 @@
     }
     if (g.phase === 'gameover' && !S.shownOver) { S.shownOver = true; Sfx.play('win'); gameOverModal(); }
     refreshModal();
+  }
+
+  // Players kept getting lost, so: announce whose turn it is, and remember where each player's last turn
+  // ended so they can be shown what happened while they were away.
+  function trackTurns(g) {
+    const me = S.view.you;
+    if (S.lastCurrent !== undefined && S.lastCurrent !== g.current && g.phase !== 'gameover') {
+      S.turnEnd[S.lastCurrent] = g.logSeq;
+      Board.showTurn(g.players[g.current], 1700 * animScale());
+    }
+    S.lastCurrent = g.current;
+    if (S.turnEnd[me] === undefined && g.current !== me) S.turnEnd[me] = g.logSeq; // joined mid-game: nothing to recap yet
+    if (g.phase === 'roll' && g.decider().id === me && S.turnEnd[me] !== undefined && S.recapTurn !== g.turnCount) {
+      S.recapTurn = g.turnCount;
+      S.recap = g.log.filter((l) => l.id > S.turnEnd[me]).slice(-12);
+      S.recapOpen = S.recap.length > 0;
+    } else if (!(g.phase === 'roll' && g.decider().id === me)) S.recapOpen = false;
+  }
+
+  function recapCard(g, me) {
+    const name = g.players[me].name;
+    return h('div', { class: 'recap' },
+      h('div', { class: 'recap-head' }, h('b', {}, 'While you were away'),
+        h('button', { class: 'btn small ghost', onclick: () => { S.recapOpen = false; renderPanel(); } }, 'Got it')),
+      S.recap.map((l) => h('div', { class: 'recap-line' + (l.pid === me || l.text.includes(name) ? ' mine' : '') },
+        l.pid != null && g.players[l.pid] ? h('i', { class: 'dot', style: `background:${g.players[l.pid].color}` }) : null, l.text)));
+  }
+
+  // Host-only game speed selector (also available mid-game).
+  function speedSelect(prefix) {
+    const cur = S.view.settings.speed;
+    return h('select', { class: 'input speed-select', title: 'How fast bots play and animations run', onchange: (e) => lobby('setSpeed', { speed: e.target.value }) },
+      Object.entries(SPEEDS).map(([k, s]) => h('option', { value: k, selected: k === cur }, (prefix || '') + s.label)));
+  }
+  function renderSpeed() {
+    const box = $('#speedbox');
+    if (!box) return;
+    const key = `${S.view.isHost}:${S.view.settings.speed}`;
+    if (S.speedShown === key) return; // don't rebuild (and close) the dropdown on every update
+    S.speedShown = key;
+    box.replaceChildren(S.view.isHost ? speedSelect('Speed: ') : h('span', { class: 'muted small-note' }, SPEEDS[S.view.settings.speed].label));
   }
 
   function renderRound() {
@@ -362,7 +414,8 @@
             seat.type === 'bot' ? h('span', { class: 'tag' }, icon('assets/icons/bot', '', 'tag-icon bot'), 'Bot') : null,
             seat.type === 'human' && !seat.connected && !p.bankrupt ? h('span', { class: 'tag warn' }, seat.botControlled ? 'bot-controlled' : 'offline') : null,
             p.inJail ? h('span', { class: 'tag' }, icon('assets/icons/jail', '', 'tag-icon'), 'Jail') : null,
-            p.jailCards ? h('span', { class: 'tag' }, icon('assets/icons/jail-card', '', 'tag-icon'), `×${p.jailCards}`) : null),
+            p.jailCards ? h('span', { class: 'tag' }, icon('assets/icons/jail-card', '', 'tag-icon'), `×${p.jailCards}`) : null,
+            g.debtOf(p.id) ? h('span', { class: 'tag warn', title: 'Owed to the bank' }, `Owes ${money(g.debtOf(p.id))}`) : null),
           h('div', { class: 'prow' }, h('span', { class: 'cash' + (delta ? ' bump' : '') }, p.bankrupt ? null : icon('assets/icons/money', '', 'cash-icon'), cashEl), h('div', { class: 'pips' }, pips))),
         delta ? h('span', { class: 'float ' + (delta > 0 ? 'up' : 'down') }, (delta > 0 ? '+' : '−') + money(Math.abs(delta))) : null,
         isHost && seat.type === 'human' && !seat.mine && !p.bankrupt && !seat.connected
@@ -475,6 +528,7 @@
     }
 
     const me_ = g.players[me];
+    if (S.recapOpen && g.phase === 'roll') el.append(recapCard(g, me));
     const row = h('div', { class: 'btn-row' });
     switch (g.phase) {
       case 'roll':
@@ -506,7 +560,7 @@
       case 'debt': {
         const debt = g.debt;
         const to = debt.creditor != null ? g.players[debt.creditor].name : 'the bank';
-        el.append(h('div', { class: 'status warn' }, `You owe ${money(debt.amount)} to ${to} but have ${money(me_.cash)}. Sell buildings or mortgage properties (you could raise up to ${money(g.liquidValue(me))}).`));
+        el.append(h('div', { class: 'status warn' }, `You owe ${money(debt.amount)} to ${to} but have ${money(me_.cash)}. Sell buildings, mortgage properties, or borrow from the bank (you could raise up to ${money(g.liquidValue(me))} by selling).`));
         row.append(btn('Declare bankruptcy', 'danger', () => { if (confirm('Really go bankrupt? You are out of the game.')) act('declareBankruptcy'); }));
         break;
       }
@@ -517,6 +571,7 @@
     if (['roll', 'postroll', 'buy', 'debt'].includes(g.phase)) {
       el.append(h('div', { class: 'btn-row' },
         btn('My properties', '', openDeeds),
+        btn('Bank', '', openBank),
         ['roll', 'postroll'].includes(g.phase) ? btn('Trade', '', openTradeComposer, g.alive().length < 2) : null));
     }
   }
@@ -674,7 +729,7 @@
     const scroll = box.scrollTop;
     const known = S.shownDeeds;
     S.shownDeeds = new Set(mine);
-    $('#deeds-sub').textContent = `${money(g.players[me].cash)} cash · ${mine.length} propert${mine.length === 1 ? 'y' : 'ies'}`;
+    $('#deeds-sub').textContent = `${money(g.players[me].cash)} cash · ${mine.length} propert${mine.length === 1 ? 'y' : 'ies'}${g.debtOf(me) ? ` · owes the bank ${money(g.debtOf(me))}` : ''}`;
     $('#deeds-toggle').textContent = `My properties (${mine.length})`;
     box.replaceChildren(...(mine.length
       ? mine.map((i) => {
@@ -684,6 +739,53 @@
       })
       : [h('div', { class: 'deeds-empty' }, 'Properties you buy will appear here, with their rents and build options.')]));
     box.scrollTop = scroll;
+  }
+
+  // ------------------------------------------------------------------ the bank
+  // Total interest you would pay on a loan if you only make the scheduled payments.
+  function interestEstimate(c, amount) {
+    let remaining = amount, total = 0;
+    const step = Math.ceil(amount / c.rounds);
+    while (remaining > 0) { total += Math.ceil(remaining * c.rate); remaining -= Math.min(step, remaining); }
+    return total;
+  }
+
+  function openBank() { openModal(buildBank, { kind: 'bank', cls: 'wide' }); }
+
+  function buildBank() {
+    const g = S.game, me = S.view.you, c = g.rules.loans, p = g.players[me];
+    const avail = g.creditAvailable(me), loans = g.loansOf(me);
+    const amounts = [100, 200, 300, 500, 800, 1000, 1500, 2000].filter((a) => a >= c.min && a % c.step === 0 && a <= c.creditCap);
+    const pct = Math.round(c.rate * 100);
+    const borrowBtn = (a) => {
+      const err = g.canBorrow(me, a);
+      return h('button', { class: 'bank-amount', disabled: !!err, title: err || `Pay back about ${money(a + interestEstimate(c, a))} in total`, onclick: () => act('borrow', [a]) },
+        h('b', {}, money(a)), h('small', {}, `+${money(interestEstimate(c, a))} interest`));
+    };
+    const loanRow = (l) => {
+      const input = h('input', { class: 'input', type: 'number', min: 1, max: l.remaining, value: Math.min(100, l.remaining) });
+      const payBtn = (label, amount, extra = '') => {
+        const err = g.canRepay(me, l.id, amount);
+        return h('button', { class: 'btn small' + extra, disabled: !!err, title: err || '', onclick: () => act('repay', [l.id, amount]) }, label);
+      };
+      return h('div', { class: 'loan' },
+        h('div', { class: 'loan-top' }, h('b', {}, `Loan #${l.id}`), h('span', {}, `owe ${money(l.remaining)} of ${money(l.principal)}`)),
+        h('div', { class: 'muted' }, `Next payment at the start of your turn: ${money(g.paymentDue(l))} (${money(Math.min(l.step, l.remaining))} back + ${money(g.interestDue(l))} interest)`),
+        h('div', { class: 'btn-row' },
+          l.remaining > 100 ? payBtn(`Pay ${money(100)}`, 100) : null,
+          payBtn(`Pay it all ${money(l.remaining)}`, l.remaining, ' primary'),
+          input,
+          h('button', { class: 'btn small', onclick: () => act('repay', [l.id, Math.floor(Number(input.value))]) }, 'Pay amount')));
+    };
+    return h('div', { class: 'bank' },
+      h('h2', {}, 'The Bank'),
+      h('p', { class: 'muted' }, `You have ${money(p.cash)}. The bank lends up to half of what you own (at most ${money(c.creditCap)}), ${c.maxActive} loans at a time. `
+        + `Each round you pay back a fifth of the loan plus ${pct}% interest on what you still owe, so paying early saves interest. `
+        + 'Anything you owe counts against your net worth, and if you go bankrupt the bank writes it off.'),
+      h('div', { class: 'bank-credit' }, `You can borrow up to `, h('b', {}, money(avail)), ` right now`, loans.length >= c.maxActive ? ` (you already have ${c.maxActive} loans)` : ''),
+      h('div', { class: 'bank-amounts' }, amounts.map(borrowBtn)),
+      loans.length ? [h('h3', {}, 'Your loans'), loans.map(loanRow)] : h('p', { class: 'muted' }, "You don't owe the bank anything."),
+      h('div', { class: 'btn-row' }, h('button', { class: 'btn', onclick: closeModal }, 'Close')));
   }
 
   // ---- trading

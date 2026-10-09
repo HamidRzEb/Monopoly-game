@@ -99,6 +99,26 @@ function connect(port, room, key, onState) {
     assert.strictEqual(g.players[pi].cash, cashBefore[0] + 150);
     assert.strictEqual(g.players[oi].cash, cashBefore[1] - 150);
     assert.strictEqual(room.trade, null);
+    // ---- the bank over the wire: borrow/repay are validated by the server like every other action
+    const cashNow = g.players[cur].cash;
+    r = await act(proposer.key === a.key ? a : b, 'borrow', { args: [250] });
+    assert.strictEqual(r.status, 400, 'loans come in steps of $100');
+    r = await act(other, 'borrow', { args: [100] });
+    assert.strictEqual(r.status, 400, 'only the player whose turn it is can borrow');
+    r = await act(proposer, 'borrow', { args: [300] });
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    assert.strictEqual(g.players[cur].cash, cashNow + 300);
+    assert.strictEqual(g.debtOf(cur), 300);
+    r = await act(proposer, 'repay', { args: [g.loansOf(cur)[0].id, 100] });
+    assert.strictEqual(r.ok, true, JSON.stringify(r));
+    assert.strictEqual(g.debtOf(cur), 200);
+    r = await act(proposer, 'repay', { args: [999, 100] });
+    assert.strictEqual(r.status, 400, 'unknown loan');
+    // the host can change the speed, anyone else cannot
+    assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: proposer.key === a.key ? a.key : b.key, op: 'setSpeed', speed: 'fast' })).ok, proposer === a, 'only the host (Alice) may');
+    assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: a.key, op: 'setSpeed', speed: 'warp' })).status, 400);
+    assert.strictEqual((await api(port, '/api/lobby', { room: a.room, key: a.key, op: 'setSpeed', speed: 'relaxed' })).ok, true);
+    assert.strictEqual(room.settings.speed, 'relaxed');
     console.log('counter-offer flow OK');
   }
 

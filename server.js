@@ -11,8 +11,8 @@ const path = require('path');
 const crypto = require('crypto');
 const { Game } = require('./js/engine.js');
 const AI = require('./js/ai.js');
-const { TOKENS, PLAYER_COLORS, BOT_NAMES, RULES } = require('./js/data.js');
-const DEFAULT_SETTINGS = { maxRounds: RULES.maxRounds };
+const { TOKENS, PLAYER_COLORS, BOT_NAMES, RULES, SPEEDS } = require('./js/data.js');
+const DEFAULT_SETTINGS = { maxRounds: RULES.maxRounds, speed: 'relaxed' };
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
@@ -230,12 +230,15 @@ function isBotControlled(room, idx) {
   return !s.connected && Date.now() - s.lastSeen > TAKEOVER_MS; // temporary stand-in for a dropped player
 }
 
+// How long bots pause, from the room's speed setting (Relaxed / Normal / Fast).
+const pace = (room) => SPEEDS[room.settings && room.settings.speed] || SPEEDS.normal;
+
 function scheduleBot(room, delay) {
   const g = room.game;
   if (room.botTimer || !g || g.phase === 'gameover' || room.trade) return;
   if (!connectedHumans(room).length) return; // nobody watching, pause
   const d = g.decider();
-  let wait = delay == null ? 900 : delay;
+  let wait = delay == null ? 900 * pace(room).bot : delay;
   if (!isBotControlled(room, d.id)) {
     const s = room.seats[d.id];
     if (s.type === 'human' && !s.connected) wait = Math.max(wait, TAKEOVER_MS - (Date.now() - s.lastSeen) + 50);
@@ -256,20 +259,22 @@ function runBot(room) {
   if (!g || g.phase === 'gameover') return;
   const d = g.decider();
   if (!isBotControlled(room, d.id)) return scheduleBot(room);
-  const before = { roll: g.rollSeq, card: g.cardSeq };
+  const before = { roll: g.rollSeq, card: g.cardSeq, turn: g.turnCount };
+  const { bot, anim } = pace(room);
   try {
     if (!room.trade && g.current === d.id && ['roll', 'postroll'].includes(g.phase)) {
       const offer = AI.proposeTrade(g, d);
-      if (offer && botOffersTrade(room, d, offer)) return afterChange(room, 1500);
+      if (offer && botOffersTrade(room, d, offer)) return afterChange(room, 1500 * bot);
     }
     AI.act(g);
   } catch (e) {
     console.error('bot error:', e);
     fallbackAction(g, d.id);
   }
-  let delay = g.phase === 'auction' ? 500 : 800 + Math.random() * 500;
-  if (g.rollSeq !== before.roll) delay += 2300; // let clients finish the dice + walking animation
-  if (g.cardSeq !== before.card) delay += 2200;
+  let delay = (g.phase === 'auction' ? 500 : 800 + Math.random() * 500) * bot;
+  if (g.rollSeq !== before.roll) delay += 2300 * anim; // let clients finish the dice + walking animation
+  if (g.cardSeq !== before.card) delay += 2200 * anim;
+  if (g.turnCount !== before.turn) delay += 1500 * bot; // a visible beat when the turn passes to someone else
   afterChange(room, delay);
 }
 
@@ -308,6 +313,7 @@ const GAME_ACTIONS = {
   rollDice: [], buy: [], declineBuy: [], endTurn: [], payJailFine: [], useJailCard: [],
   declareBankruptcy: [], auctionPass: [],
   build: ['int'], sellHouse: ['int'], mortgage: ['int'], unmortgage: ['int'], auctionBid: ['int'],
+  borrow: ['int'], repay: ['int', 'int'], // the bank: (amount) and (loanId, amount)
 };
 
 function cleanOffer(o) {
@@ -356,6 +362,13 @@ const routes = {
     const me = actorSeat(room, body);
     const isHost = isHostKey(room, body.key);
     switch (body.op) {
+      case 'setSpeed': {
+        if (!isHost) fail('Only the host can change the game speed.', 403);
+        if (!SPEEDS[body.speed]) fail('Unknown speed.');
+        room.settings.speed = body.speed; // allowed mid-game too
+        if (room.game) room.game.say(`Game speed set to ${SPEEDS[body.speed].label}.`);
+        break;
+      }
       case 'setLength': {
         if (!isHost) fail('Only the host can change the game length.', 403);
         if (room.game) fail('The game has started.');

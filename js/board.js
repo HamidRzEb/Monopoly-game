@@ -45,6 +45,7 @@
         icon('assets/icons/' + s.id, '', 'ticon'),
         h('div', { class: 'tprice' }, priceLabel(s))),
       h('div', { class: 'mort-mark' }, icon('assets/icons/mortgaged', 'MORTGAGED', 'mort-img')),
+      h('div', { class: 'owner-tag' }), // small coloured tag in the owner's colour (shown when owned)
       tokens);
       root.append(el);
       return { el, band, tokens };
@@ -54,12 +55,14 @@
     center = {
       dice,
       slot: h('div', { class: 'card-slot' }),
+      banner: h('div', { class: 'banner-slot' }),
       ticker: h('div', { class: 'ticker' }),
     };
     root.append(h('div', { class: 'center' },
       h('div', { class: 'logo' }, icon('assets/logo', '', 'logo-img'), h('div', { class: 'logo-text' }, THEME.title)),
       h('div', { class: 'dice' }, dice),
       center.ticker,
+      center.banner,
       center.slot));
     setDice(null);
   }
@@ -75,7 +78,7 @@
 
   // Both dice are thrown in from opposite corners, tumble, bounce and settle; faces flicker
   // quickly at first and slow down like real dice coming to rest.
-  async function rollAnimation(final) {
+  async function rollAnimation(final, scale = 1) {
     const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     if (document.hidden || reduce || !center.dice[0].animate) { setDice(final); return; }
     const rnd = () => 1 + Math.floor(Math.random() * 6);
@@ -91,14 +94,14 @@
         { transform: `translate(0, 8%) rotate(${spin[k] * 690}deg) scale(1)`, offset: 0.86 },
         { transform: `translate(0, -6%) rotate(${spin[k] * 715}deg) scale(1)`, offset: 0.94 },
         { transform: `translate(0, 0) rotate(${spin[k] * 720}deg) scale(1)`, offset: 1 },
-      ], { duration: 1050 + k * 140, easing: 'ease-out' });
+      ], { duration: (1050 + k * 140) * scale, easing: 'ease-out' });
     });
-    let delay = 45;
-    const end = performance.now() + 900;
+    let delay = 45 * scale;
+    const end = performance.now() + 900 * scale;
     while (performance.now() < end) {
       setDice([rnd(), rnd()]);
       await sleep(delay);
-      delay += 16;
+      delay += 16 * scale;
     }
     setDice(final);
     await Promise.all(anims.map((a) => a.finished.catch(() => {})));
@@ -148,7 +151,7 @@
   }
   const flashTile = (i) => pulse(refs[i].el, 'landed', 1000);
 
-  function showCard(card, who) {
+  function showCard(card, who, ms = 4800) {
     clearTimeout(cardTimer);
     const label = card.deck === 'chance' ? 'Chance' : 'Community Chest';
     const el = h('div', { class: 'drawn-card ' + card.deck },
@@ -162,8 +165,17 @@
     el.onclick = close;
     center.slot.replaceChildren(el);
     centerEl.classList.add('card-open'); // hides the status line behind the card
-    cardTimer = setTimeout(close, 4800);
+    cardTimer = setTimeout(close, ms);
   }
 
-  window.Board = { build, render, renderTokens, rollAnimation, setDice, showCard, flashTile, tokenIcon, tokenInfo };
+  // A short "Ada's turn" banner in the middle of the board whenever the turn passes on.
+  let bannerTimer = null;
+  function showTurn(player, ms = 1700) {
+    clearTimeout(bannerTimer);
+    const el = h('div', { class: 'turn-banner', style: `--c:${player.color}` }, tokenIcon(player.token), h('span', {}, `${player.name}'s turn`));
+    center.banner.replaceChildren(el);
+    bannerTimer = setTimeout(() => el.remove(), ms);
+  }
+
+  window.Board = { build, render, renderTokens, rollAnimation, setDice, showCard, showTurn, flashTile, tokenIcon, tokenInfo };
 })();

@@ -53,6 +53,11 @@ const AI = {
 
   buy(g, p) {
     const s = SPACES[p.pos];
+    // Short of cash for a property that completes a colour set? Borrow just enough (keeping a small cushion).
+    if (p.cash < s.price && completesSet(g, p.id, p.pos)) {
+      const need = Math.ceil((s.price + 50 - p.cash) / g.rules.loans.step) * g.rules.loans.step;
+      if (need <= 600 && !g.canBorrow(p.id, need)) return g.borrow(p.id, need);
+    }
     if (p.cash >= s.price && (completesSet(g, p.id, p.pos) || p.cash - s.price >= RESERVE)) return g.buy(p.id);
     return g.declineBuy(p.id);
   },
@@ -76,9 +81,19 @@ const AI = {
   },
 
   postroll(g, p) {
+    if (this.tryRepay(g, p)) return;
     if (this.tryBuild(g, p)) return;
     if (this.tryUnmortgage(g, p)) return;
     return g.endTurn(p.id);
+  },
+
+  // Pay back the biggest loan once there's comfortable cash left over afterwards.
+  tryRepay(g, p) {
+    const loans = g.loansOf(p.id).sort((a, b) => b.remaining - a.remaining);
+    for (const l of loans) {
+      if (p.cash - l.remaining >= RESERVE + 450 && !g.canRepay(p.id, l.id, l.remaining)) { g.repay(p.id, l.id, l.remaining); return true; }
+    }
+    return false;
   },
 
   tryBuild(g, p) {
