@@ -1,0 +1,18 @@
+# Start ONLY the game under pm2 at boot, without root and without touching pm2's saved list
+# (~/.pm2/dump.pm2), so other pm2 apps are not started or overwritten.
+# Needs lingering:  loginctl enable-linger $USER
+# Install:  cp deploy/tycoon-pm2.service ~/.config/systemd/user/ && systemctl --user daemon-reload \
+#           && systemctl --user enable tycoon-pm2.service
+[Unit]
+Description=Tycoon (via pm2)
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=%h/tycoon
+ExecStart=/usr/local/bin/pm2 start ecosystem.config.js
+ExecStop=/usr/local/bin/pm2 delete tycoon
+
+[Install]
+WantedBy=default.target

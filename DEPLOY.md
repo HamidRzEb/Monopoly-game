@@ -49,8 +49,11 @@ Update: `cd tycoon && git pull && pm2 restart tycoon` (this ends games in progre
 
 The config forces a single process, because games live in memory. To change the port or set
 `TRUST_PROXY`, edit `ecosystem.config.js` and run `pm2 restart tycoon --update-env`.
-Start on boot: `pm2 startup` (prints one command to run with sudo), or see
-`deploy/pm2-user.service` for a no-root user-level alternative.
+Start on boot, three ways:
+- `pm2 startup` + `pm2 save` (standard; **`pm2 save` overwrites pm2's saved list**, so only use it if
+  this game is the only thing pm2 should bring back).
+- `deploy/tycoon-pm2.service`: no root, starts **only** the game at boot and leaves pm2's saved list alone.
+- `deploy/pm2-user.service`: no root, restores everything in pm2's saved list.
 
 ## Settings (environment variables)
 
