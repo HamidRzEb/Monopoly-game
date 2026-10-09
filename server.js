@@ -630,7 +630,13 @@ const server = http.createServer(async (req, res) => {
   };
   try {
     if (url.pathname === '/api/events' && req.method === 'GET') return handleEvents(req, res, url);
-    if (url.pathname === '/api/health') return send(200, { ok: true, rooms: rooms.size });
+    if (url.pathname === '/api/health') {
+      if (process.env.DEBUG_HEADERS) { // diagnostics for setting up a proxy/CDN: shows what the proxy forwards (off by default)
+        const keep = Object.entries(req.headers).filter(([k]) => /^(x-|ar-|cf-|forwarded|via|true-client|client-ip|cdn)/.test(k));
+        console.log('DEBUG_HEADERS peer=' + req.socket.remoteAddress + ' ' + JSON.stringify(Object.fromEntries(keep)));
+      }
+      return send(200, { ok: true, rooms: rooms.size });
+    }
     const route = routes[`${req.method} ${url.pathname}`];
     if (route) {
       rateLimit(req, url.pathname === '/api/create' ? 'create' : url.pathname === '/api/join' ? 'join' : 'api');
