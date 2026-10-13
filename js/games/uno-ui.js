@@ -10,11 +10,22 @@
 
   const note = (text) => h('div', { class: 'status' }, text);
 
-  function opponent(g, p, me) {
+  // Tell the player what the last move did to someone (a pop-up over the table that outlives the next redraw).
+  function announce(g, me) {
+    const fx = g.fx;
+    if (!fx || g.phase === 'gameover' || !window.GameUI.isNew('uno-fx-' + fx.id)) return;
+    const name = (id) => (id === me ? 'You' : g.players[id].name);
+    if (fx.kind === 'skip') window.GameUI.flash('Skip!', fx.to === me ? 'You miss a turn' : `${name(fx.to)} misses a turn`, 'fx-skip');
+    else if (fx.kind === 'reverse') window.GameUI.flash('Reverse!', 'The direction changes', 'fx-rev');
+    else if (fx.kind === 'draw') window.GameUI.flash(`+${fx.n}`, fx.to === me ? `You draw ${fx.n} cards and miss a turn` : `${name(fx.to)} draws ${fx.n} and misses a turn`, 'fx-draw');
+  }
+
+  function opponent(g, p, me, isNext) {
     const turn = g.phase === 'play' && g.current === p.id;
     const shown = Math.min(p.cards, 8);
     return h('div', { class: 'uno-opp' + (turn ? ' turn' : '') + (p.id === me ? ' me' : ''), style: `--c:${p.color}` },
-      h('div', { class: 'bj-name' }, p.name, p.cards === 1 ? h('span', { class: 'uno-call' }, 'UNO!') : null),
+      h('div', { class: 'bj-name' }, p.name, p.cards === 1 ? h('span', { class: 'uno-call' }, 'UNO!') : null,
+        turn ? h('span', { class: 'uno-badge now' }, 'playing') : isNext ? h('span', { class: 'uno-badge' }, 'next') : null),
       h('div', { class: 'uno-fan' }, Array.from({ length: shown }, () => unoCard(null, { small: true }))),
       h('div', { class: 'muted' }, `${p.cards} card${p.cards === 1 ? '' : 's'}`, g.rules.target ? ` · ${p.score} pts` : ''));
   }
@@ -33,12 +44,20 @@
       const pile = h('button', { class: 'uno-pile' + (canDraw ? ' can' : ''), disabled: !canDraw, title: canDraw ? 'Draw a card' : '', onclick: () => act('draw') },
         unoCard(null), h('span', { class: 'uno-count' }, `${g.drawLeft}`));
       const top = g.discard[g.discard.length - 1];
+      announce(g, me);
+      const n = g.players.length, nextId = g.phase === 'play' ? g.next() : -1;
+      const opps = Array.from({ length: n - 1 }, (_, k) => g.players[(me + 1 + k) % n]); // seat order around the table, starting after you
+      const cur = g.players[g.current];
+      const banner = g.phase !== 'play' ? h('div', { class: 'uno-turn over' }, 'Round over')
+        : myTurn ? h('div', { class: 'uno-turn mine' }, g.drawn !== null ? 'Your turn: play the card you drew, or keep it' : 'Your turn')
+        : h('div', { class: 'uno-turn', style: `--c:${cur.color}` }, `${cur.name}'s turn`);
       el.replaceChildren(h('div', { class: 'felt uno-felt' },
-        h('div', { class: 'uno-opps' }, g.players.filter((p) => p.id !== me).map((p) => opponent(g, p, me))),
+        banner,
+        h('div', { class: 'uno-opps' }, opps.map((p) => opponent(g, p, me, p.id === nextId))),
         h('div', { class: 'uno-center' },
-          pile,
-          h('div', { class: `uno-discard ring-${g.color}` }, unoCard(top, { key: `uno-top-${g.discardCount}-${top}` })),
-          h('div', { class: 'uno-dir', title: g.dir === 1 ? 'Clockwise' : 'Counter-clockwise' }, g.dir === 1 ? '↻' : '↺')),
+          h('div', { class: 'uno-pilebox' }, pile, h('span', { class: 'uno-cap' }, canDraw ? 'Tap to draw' : 'Draw pile')),
+          h('div', { class: 'uno-pilebox' }, h('div', { class: `uno-discard ring-${g.color}` }, unoCard(top, { key: `uno-top-${g.discardCount}-${top}` })), h('span', { class: 'uno-cap' }, 'Play on this')),
+          h('div', { class: 'uno-dir', title: g.dir === 1 ? 'Clockwise' : 'Counter-clockwise' }, h('span', {}, g.dir === 1 ? '↻' : '↺'), h('small', {}, 'direction'))),
         h('div', { class: 'uno-colorline' }, 'Colour: ', h('b', { class: `uno-colorname c-${g.color}` }, UNO.COLOR_NAME[g.color])),
         over ? h('div', { class: 'uno-over' },
           h('b', {}, `${g.players[g.roundWinner].name} won the round${g.rules.target ? ` and scored ${g.roundPoints}` : ''}.`),
@@ -72,19 +91,20 @@
         } }, el);
         return wrap;
       });
+      const canAny = hand.some((_, i) => g.canPlay(me, i));
       let status;
-      if (!mine) status = note(`Waiting for ${g.players[g.current].name}…`);
-      else if (pendingWild !== null) status = note('Choose the new colour:');
-      else if (g.drawn !== null) status = note(`You drew ${UNO.cardLabel(hand[g.drawn])}. Play it, or keep it.`);
-      else status = note(g.hands[me].some((_, i) => g.canPlay(me, i)) ? 'Your turn: play a card, or draw one.' : "You can't play: draw a card.");
-      const colors = pendingWild === null ? null : h('div', { class: 'btn-row' },
+      if (!mine) status = note(`Waiting for ${g.players[g.current].name}… your cards:`);
+      else if (pendingWild !== null) status = note('Which colour should the game continue with?');
+      else if (g.drawn !== null) status = note(`You drew ${UNO.cardLabel(hand[g.drawn])}, and it fits. Play it, or keep it and pass.`);
+      else status = note(canAny ? 'Your turn: tap a raised card to play it. Cards that are faded can\'t be played.' : 'You have nothing that fits. Draw a card.');
+      const colors = pendingWild === null ? null : h('div', { class: 'uno-colors' },
         UNO.COLORS.map((c, ci) => h('button', { class: `btn uno-color uc-${c}`, onclick: () => { const i = pendingWild; pendingWild = null; act('play', [i, ci]); } }, UNO.COLOR_NAME[c])),
-        btn('Cancel', 'ghost', () => { pendingWild = null; window.GameUI.rerenderPanel(); }));
+        h('button', { class: 'btn ghost uno-cancel', onclick: () => { pendingWild = null; window.GameUI.rerenderPanel(); } }, 'Cancel'));
       return [
         status,
         colors,
         mine && pendingWild === null ? h('div', { class: 'btn-row' },
-          g.drawn === null ? btn('Draw a card', '', () => act('draw')) : btn('Keep it and pass', '', () => act('pass'))) : null,
+          g.drawn === null ? btn('Draw a card', canAny ? '' : 'primary big pulse', () => act('draw')) : btn('Keep it and pass', 'primary', () => act('pass'))) : null,
         h('div', { class: 'uno-hand' }, cards),
       ];
     },

@@ -49,6 +49,15 @@
       h('span', { class: 'uno-corner' }, face), h('span', { class: 'uno-face' }, face));
   }
 
+  // A big message that pops up over the table for a moment ("Skip!", "+2"...). It lives on the page itself, not in
+  // the table, so the table being redrawn by the next update doesn't cut it short.
+  function flash(text, sub, cls = '') {
+    document.querySelectorAll('.fx-flash').forEach((e) => e.remove()); // a newer message replaces the old one, never stacks on it
+    const el = h('div', { class: 'fx-flash ' + cls }, h('b', {}, text), sub ? h('span', {}, sub) : null);
+    document.body.append(el);
+    setTimeout(() => el.remove(), 1900);
+  }
+
   // ---- chips
   const chips = (n, cls = '') => h('span', { class: 'cg-chips ' + cls }, h('i', { class: 'cg-chip-dot' }), Number(n).toLocaleString('en-US'));
 
@@ -58,6 +67,6 @@
     reset() { seen = new Set(); quiet = true; },        // a new game screen is being built
     endRender() { quiet = false; },                      // after the first draw, new cards animate
     rerenderPanel() {},                                  // replaced by the client: redraw the action panel now
-    isNew, playingCard, unoCard, chips,
+    isNew, flash, playingCard, unoCard, chips,
   };
 })();

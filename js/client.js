@@ -175,12 +175,12 @@
       h('h2', {}, meta.name),
       h('p', { class: 'muted game-tagline' }, meta.tagline),
       h('div', { class: 'game-facts' }, h('span', { class: 'tile-players' }, playersText(meta)), h('span', { class: 'tile-players' }, 'Bots can fill any seat')),
-      h('div', { class: 'hub-label' }, 'How to play'),
-      h('ul', { class: 'rule-list' }, meta.rules.map((r) => h('li', {}, r))),
       h('div', { class: 'game-actions' },
         h('button', { class: 'btn primary big', onclick: onOnline }, 'Create online room'),
         h('button', { class: 'btn big', onclick: onLocal }, 'Local co-op (same device)')),
       h('p', { class: 'muted small-note' }, 'Online: share the room code with friends. Local co-op: everyone plays on this screen, taking turns. In the lobby you can add bots either way.'),
+      h('div', { class: 'hub-label' }, 'How to play'),
+      h('ul', { class: 'rule-list' }, meta.rules.map((r) => h('li', {}, r))),
       h('button', { class: 'link', onclick: closeModal }, 'Back to all games')),
     { kind: 'game', live: false });
   }
@@ -622,6 +622,7 @@
     app.replaceChildren(h('div', { class: 'cg' },
       h('div', { class: 'cg-main' },
         h('div', { id: 'cg-table', class: 'cg-table' }),
+        h('div', { id: 'cg-ticker', class: 'cg-ticker' }),
         h('div', { id: 'panel', class: 'cg-panel' })),
       h('aside', { class: 'cg-side' },
         topbar(),
@@ -645,6 +646,7 @@
     $('#round').textContent = label ? ` · ${label}` : '';
     renderCardPlayers(g, ui);
     ui.renderTable($('#cg-table'), ctx);
+    renderTicker(g);
     renderCardPanel(false);
     renderLog();
     const localCount = v.seats.filter((x) => x.mine).length;
@@ -656,6 +658,15 @@
     if (g.phase === 'gameover' && !S.shownOver) { S.shownOver = true; Sfx.play('win'); cardOverModal(ui); }
     refreshModal();
     GameUI.endRender();
+  }
+
+  // The last few things that happened, right under the table (the full log is far down the page on a phone).
+  function renderTicker(g) {
+    const el = $('#cg-ticker');
+    if (!el) return;
+    const lines = g.log.slice(-3);
+    el.replaceChildren(...lines.map((l, i) => h('div', { class: 'tick' + (i === lines.length - 1 ? ' latest' : '') },
+      l.pid != null && g.players[l.pid] ? h('i', { class: 'dot', style: `background:${g.players[l.pid].color}` }) : null, l.text)));
   }
 
   function renderCardPanel(force) {

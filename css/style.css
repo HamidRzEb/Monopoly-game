@@ -482,9 +482,9 @@ h1, h2, h3 { margin: 0 0 .4em; }
 .game-tagline { margin: 0 0 12px; line-height: 1.5; }
 .game-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 .game-dialog .hub-label { margin: 0 0 8px; }
-.game-actions { display: grid; gap: 12px; margin-top: 22px; }
+.game-actions { display: grid; gap: 12px; margin-top: 4px; }
 .game-dialog .btn.big { width: 100%; }
-.game-dialog .small-note { margin: 16px 0 6px; line-height: 1.5; }
+.game-dialog .small-note { margin: 12px 0 18px; line-height: 1.5; }
 .game-dialog .link { display: block; margin: 12px auto 4px; }
 .rule-list { margin: 0; padding-left: 1.3em; font-size: .94rem; line-height: 1.5; color: #34414f; }
 .rule-list li { margin: 8px 0; }
@@ -664,4 +664,78 @@ h1, h2, h3 { margin: 0 0 .4em; }
 }
 @media (min-width: 1800px) and (min-height: 1000px) {
   .felt > * { zoom: 1.5; }
+}
+
+/* ======================================================================= Uno feedback: who is playing, what just happened */
+.uno-turn { align-self: center; background: #fff; color: #1d2733; border: 3px solid var(--c, #888); border-radius: 99px; padding: .3em 1.1em; font-weight: 800; font-size: 1.05rem; box-shadow: 0 2px 8px #0004; text-align: center; max-width: 100%; }
+.uno-turn.mine { background: #ffd54a; border-color: #fff; animation: cardpulse 1.4s infinite; }
+.uno-turn.over { background: #ffffffd8; border-color: #fff; }
+.uno-badge { font-size: .65rem; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; background: #ffffff33; border-radius: 99px; padding: .05em .55em; }
+.uno-badge.now { background: #ffd54a; color: #1d2733; }
+.uno-pilebox { display: grid; justify-items: center; gap: 6px; }
+.uno-cap { font-size: .75rem; color: #dbe7ff; font-weight: 700; }
+.uno-dir { display: grid; justify-items: center; opacity: .9; }
+.uno-dir small { font-size: .65rem; letter-spacing: .05em; text-transform: uppercase; color: #dbe7ff; }
+.uno-center { align-items: flex-start; }
+
+/* big pop-up for Skip / Reverse / +2 / +4: lives on the page so the next update can't cut it short */
+.fx-flash { position: fixed; left: 50%; top: 34%; transform: translate(-50%, -50%); z-index: 90; pointer-events: none; display: grid; justify-items: center; gap: 4px; padding: .5em 1.4em; border-radius: 18px; color: #fff; text-align: center; box-shadow: 0 10px 30px #0006; animation: fxpop 1.9s ease-out forwards; max-width: calc(100vw - 24px); }
+.fx-flash b { font-size: 2.6rem; line-height: 1; text-shadow: 0 2px 0 #0004; }
+.fx-flash span { font-size: 1rem; font-weight: 700; }
+.fx-skip { background: #d32f2f; } .fx-rev { background: #1e6fd9; } .fx-draw { background: #7b1fa2; }
+@keyframes fxpop { 0% { transform: translate(-50%, -30%) scale(.5); opacity: 0; } 12% { transform: translate(-50%, -50%) scale(1.12); opacity: 1; } 22% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { transform: translate(-50%, -62%) scale(1); opacity: 0; } }
+
+/* the last few events, under the table (phones: the full log is far below) */
+.cg-ticker { display: none; background: #ffffffd0; border-radius: 12px; padding: 6px 12px; font-size: .88rem; min-height: 0; }
+.tick { padding: 1px 0; color: #5a6672; }
+.tick .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.tick.latest { color: #1d2733; font-weight: 700; }
+
+.uno-colors { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 6px 0; }
+.uno-colors .uno-color { padding: .8em .2em; }
+.uno-colors .uno-cancel { grid-column: 1 / -1; }
+
+/* ---- game-over modal: centred, compact */
+.gameover h1 { font-size: 1.9rem; margin: .1em 0 .3em; }
+.gameover .btn-row { justify-content: center; }
+.gameover ol { margin: 8px 0 14px; padding-left: 0; list-style-position: inside; text-align: left; }
+
+/* ======================================================================= phones: layout fixes */
+@media (max-width: 900px) {
+  /* the desktop rule `align-items: flex-start` made every block only as wide as its content: stretch them to the screen */
+  .cg { align-items: stretch; }
+  .cg-ticker { display: block; order: 0; }
+  /* the Sound button moves to the top corner, where it can't cover a button or a card */
+  #sound-toggle { top: 6px; right: 6px; bottom: auto; left: auto; font-size: .7rem; padding: 2px 8px; opacity: .85; }
+  .screen { padding-top: 38px; }
+  body:has(.game) #sound-toggle { top: auto; right: auto; bottom: 8px; left: 8px; } /* Tycoon's board owns the top of the screen */
+
+  .backdrop { padding: 10px; align-items: center; }
+  .modal-box { padding: 16px; width: 100%; max-height: 90vh; }
+  .modal-box .btn-row { justify-content: center; }
+  .modal-box .btn-row .btn { flex: 1 1 auto; }
+  .gameover .trophy.big { height: 84px; width: 84px; margin-bottom: 4px; }
+  .gameover h1 { font-size: 1.6rem; }
+
+  /* home: compact rows instead of tall tiles */
+  .card.hub { padding: 18px 14px; }
+  .game-grid { grid-template-columns: 1fr; gap: 8px; }
+  .game-tile { display: grid; grid-template-columns: 64px 1fr; grid-template-areas: "art name" "art tag" "art players"; column-gap: 12px; row-gap: 2px; text-align: left; justify-items: start; align-items: center; padding: 10px 12px; }
+  .game-tile:hover { transform: none; }
+  .tile-art { grid-area: art; height: 56px; width: 64px; font-size: 2.2rem; }
+  .tile-art img { max-height: 56px; }
+  .tile-name { grid-area: name; font-size: 1.05rem; }
+  .tile-tag { grid-area: tag; font-size: .8rem; }
+  .tile-players { grid-area: players; margin-top: 2px; }
+  .game-dialog .rule-list { font-size: .9rem; }
+  .token-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+
+  .uno-turn { font-size: .95rem; }
+  .fx-flash { top: 28%; }
+  .fx-flash b { font-size: 2.1rem; }
+  .uno-hand { gap: 4px; }
+}
+@media (max-width: 380px) {
+  .uno-card { width: 42px; height: 62px; }
+  .uno-colors { grid-template-columns: 1fr 1fr; }
 }

@@ -55,8 +55,11 @@
       this.starter = Math.floor(this.rng() * this.players.length);
       this.roundWinner = null;
       this.roundPoints = 0;
+      this.fx = null;        // what the last move did to somebody ({ id, kind, by, to, n }), so screens can announce it
+      this.fxSeq = 0;
       this.deal();
     }
+    emit(kind, data = {}) { this.fx = { id: ++this.fxSeq, kind, ...data }; }
 
     deal() {
       this.drawPile = this.shuffle(newDeck());
@@ -140,13 +143,15 @@
       this.drawn = null;
       const v = valueOf(card);
       let steps = 1;
-      if (v === 'S') { steps = 2; this.say(`${this.players[this.next()].name} is skipped.`); }
+      this.emit('play', { by: pid });
+      if (v === 'S') { steps = 2; this.emit('skip', { by: pid, to: this.next() }); this.say(`${this.players[this.next()].name} is skipped.`); }
       else if (v === 'R') {
-        if (this.players.length === 2) { steps = 2; this.say('Reverse: with two players it acts like a skip.'); }
-        else { this.dir = -this.dir; this.say('The direction reverses.'); }
+        if (this.players.length === 2) { steps = 2; this.emit('skip', { by: pid, to: this.next() }); this.say('Reverse: with two players it acts like a skip.'); }
+        else { this.dir = -this.dir; this.emit('reverse', { by: pid }); this.say('The direction reverses.'); }
       } else if (v === 'D' || v === 'F') {
         const victim = this.next(), n = v === 'D' ? 2 : 4;
         this.giveCards(victim, n);
+        this.emit('draw', { by: pid, to: victim, n });
         this.say(`${this.players[victim].name} draws ${n} cards and misses a turn.`, victim);
         steps = 2;
       }
