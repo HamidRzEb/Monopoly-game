@@ -3,7 +3,9 @@
 (function () {
   'use strict';
   const { SPACES, COLORS, TOKENS, THEME, SPEEDS } = window.MonopolyData;
-  const { Game } = window.MonopolyEngine;
+  const GM = window.GameModules;   // every game, registered by js/games/<id>.js
+  const GameUI = window.GameUI;    // the screens of the card games, registered by js/games/<id>-ui.js
+  const gameOf = (id) => GM[id] || GM.tycoon;
   const { h, money, icon, openModal, closeModal, refreshModal, redrawModal, modalKind, toast, sleep } = window.U;
   const app = document.getElementById('app');
   const $ = (sel) => document.querySelector(sel);
@@ -100,7 +102,7 @@
     closeModal();
     // keepRoom: stay on /?room=CODE so the home screen is pre-filled and the person can rejoin
     history.replaceState(null, '', keepRoom && code ? `?room=${code}` : location.pathname);
-    document.title = THEME.title;
+    document.title = THEME.hubTitle;
     renderHome(keepRoom && code ? code : '');
     if (message) toast(message, 7000);
   }
@@ -118,6 +120,7 @@
   }
 
   // ------------------------------------------------------------------ home
+  // The hub: pick a name, then pick a game (or join a friend's room with its code).
   function renderHome(prefillCode = '') {
     if (!prefillCode) prefillCode = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
     const name = h('input', { class: 'input', maxlength: 16, placeholder: 'Your name', value: savedName() });
@@ -133,7 +136,7 @@
       history.replaceState(null, '', `?room=${r.room}`);
       connect();
     };
-    const create = async () => { const n = getName(); if (n) try { enter(await post('/api/create', { name: n })); } catch (e) { toast(e.message); } };
+    const create = async (meta) => { const n = getName(); if (n) try { closeModal(); enter(await post('/api/create', { name: n, game: meta.id })); } catch (e) { toast(e.message); } };
     const join = async () => {
       const n = getName(); if (!n) return;
       const c = code.value.trim().toUpperCase();
@@ -147,18 +150,39 @@
     const myGames = h('div', { class: 'my-games' });
     showMyGames(myGames, enter);
     code.addEventListener('input', () => { code.value = code.value.toUpperCase().replace(/[^A-Z]/g, ''); });
-    app.replaceChildren(h('div', { class: 'screen' }, h('div', { class: 'card home' },
-      icon('assets/logo', '', 'home-logo'),
-      h('h1', { class: 'home-title' }, THEME.title),
-      h('p', { class: 'muted' }, 'Buy, trade and bankrupt your friends. Add bots to fill the table.'),
+    const tiles = Object.values(GM).map((m) => m.meta).map((meta) => h('button', { class: 'game-tile', onclick: () => gameDialog(meta, () => create(meta), () => { const n = getName(); if (n) { closeModal(); localSetup(n, meta); } }) },
+      icon(meta.art || `assets/games/${meta.id}`, meta.icon, 'tile-art'),
+      h('span', { class: 'tile-name' }, meta.name),
+      h('span', { class: 'tile-tag' }, meta.tagline),
+      h('span', { class: 'tile-players' }, playersText(meta))));
+    app.replaceChildren(h('div', { class: 'screen' }, h('div', { class: 'card hub' },
+      h('h1', { class: 'home-title' }, THEME.hubTitle),
+      h('p', { class: 'muted center-text' }, THEME.hubTagline),
       myGames,
       name,
-      h('button', { class: 'btn primary big', onclick: create }, 'Create online room'),
-      h('button', { class: 'btn big', onclick: () => localSetup(name.value.trim()) }, 'Local co-op (same device)'),
-      h('p', { class: 'muted small-note' }, 'Local co-op: everyone plays on this screen, taking turns. You can still add bots, or friends online.'),
-      h('div', { class: 'or' }, 'or join an online room'),
+      h('div', { class: 'hub-label' }, 'Choose a game'),
+      h('div', { class: 'game-grid' }, tiles),
+      h('div', { class: 'or' }, 'or join a friend\'s room'),
       h('div', { class: 'row' }, code, h('button', { class: 'btn big', onclick: join }, 'Join')))));
-    name.focus();
+    if (prefillCode) code.focus(); else name.focus();
+  }
+
+  const playersText = (meta) => (meta.minPlayers === meta.maxPlayers ? `${meta.minPlayers} players` : `${meta.minPlayers === 1 ? 'Solo or ' : ''}${Math.max(2, meta.minPlayers)}–${meta.maxPlayers} players`);
+
+  // After picking a game: what it is, and how to start playing it.
+  function gameDialog(meta, onOnline, onLocal) {
+    openModal(() => h('div', { class: 'game-dialog' },
+      h('h2', {}, meta.name),
+      h('p', { class: 'muted game-tagline' }, meta.tagline),
+      h('div', { class: 'game-facts' }, h('span', { class: 'tile-players' }, playersText(meta)), h('span', { class: 'tile-players' }, 'Bots can fill any seat')),
+      h('div', { class: 'hub-label' }, 'How to play'),
+      h('ul', { class: 'rule-list' }, meta.rules.map((r) => h('li', {}, r))),
+      h('div', { class: 'game-actions' },
+        h('button', { class: 'btn primary big', onclick: onOnline }, 'Create online room'),
+        h('button', { class: 'btn big', onclick: onLocal }, 'Local co-op (same device)')),
+      h('p', { class: 'muted small-note' }, 'Online: share the room code with friends. Local co-op: everyone plays on this screen, taking turns. In the lobby you can add bots either way.'),
+      h('button', { class: 'link', onclick: closeModal }, 'Back to all games')),
+    { kind: 'game', live: false });
   }
 
   // "Your games": games this browser is still part of. Each is checked with the server first, so only
@@ -171,7 +195,7 @@
       if (!info.valid) { const rest = loadSessions(); delete rest[code]; storeSessions(rest); continue; }
       const mine = info.status === 'playing' ? 'game in progress' : 'waiting in the lobby';
       box.append(h('div', { class: 'my-game' },
-        h('div', {}, h('b', {}, `Room ${code}`), h('span', { class: 'muted' }, ` · ${mine} · ${info.seats.length} players`)),
+        h('div', {}, h('b', {}, `${gameOf(info.game).meta.name} · room ${code}`), h('span', { class: 'muted' }, ` · ${mine} · ${info.seats.length} players`)),
         h('button', { class: 'btn primary', onclick: () => enter({ room: code, key: sess.key }) }, 'Rejoin')));
     }
     if (box.children.length) box.prepend(h('div', { class: 'muted small-note' }, 'Your games'));
@@ -203,21 +227,22 @@
 
   // Local co-op: a few people share this screen. Names are collected here, then it's the normal lobby
   // (where bots and online friends can still be added).
-  function localSetup(firstName) {
-    const names = [firstName || savedName() || 'Player 1', 'Player 2'];
+  function localSetup(firstName, meta) {
+    const names = [firstName || savedName() || 'Player 1', 'Player 2'].slice(0, Math.max(meta.minPlayers, 2));
+    while (names.length < meta.minPlayers) names.push(`Player ${names.length + 1}`);
     openModal(() => h('div', { class: 'local-setup' },
-      h('h2', {}, 'Local co-op'),
+      h('h2', {}, `${meta.name}: local co-op`),
       h('p', { class: 'muted' }, 'Everyone plays on this device and takes turns. Who is playing?'),
       names.map((n, k) => h('div', { class: 'row' },
         h('input', { class: 'input', maxlength: 16, value: n, placeholder: `Player ${k + 1}`, oninput: (e) => { names[k] = e.target.value; } }),
-        names.length > 2 ? h('button', { class: 'btn small ghost', onclick: () => { names.splice(k, 1); redrawModal(); } }, 'Remove') : null)),
+        names.length > meta.minPlayers && names.length > 1 ? h('button', { class: 'btn small ghost', onclick: () => { names.splice(k, 1); redrawModal(); } }, 'Remove') : null)),
       h('div', { class: 'btn-row' },
-        h('button', { class: 'btn', disabled: names.length >= 8, onclick: () => { names.push(`Player ${names.length + 1}`); redrawModal(); } }, '+ Add player'),
+        h('button', { class: 'btn', disabled: names.length >= meta.maxPlayers, onclick: () => { names.push(`Player ${names.length + 1}`); redrawModal(); } }, '+ Add player'),
         h('button', { class: 'btn primary', onclick: async () => {
           const list = names.map((n, k) => n.trim() || `Player ${k + 1}`);
           saveName(list[0]);
           try {
-            const r = await post('/api/create', { name: list[0], locals: list.slice(1) });
+            const r = await post('/api/create', { name: list[0], locals: list.slice(1), game: meta.id });
             closeModal();
             S.room = r.room; S.key = r.key; saveSession();
             history.replaceState(null, '', `?room=${r.room}`);
@@ -232,8 +257,9 @@
   function renderLobby() {
     if (document.activeElement && document.activeElement.classList.contains('name-input')) return; // don't steal focus while typing
     const v = S.view, isHost = v.isHost;
+    const meta = gameOf(v.gameType).meta;
     const localCount = v.seats.filter((s) => s.mine).length;
-    document.title = THEME.title;
+    document.title = meta.name;
     // Every seat on this browser (me, plus local co-op players) can be renamed and given a token.
     const rows = v.seats.map((s, i) => h('li', { class: 'seat' + (s.mine ? ' me' : '') },
       s.mine
@@ -248,8 +274,18 @@
       s.type === 'human' && !s.connected ? h('span', { class: 'badge warn' }, 'offline') : null,
       isHost && i !== v.host ? h('button', { class: 'btn small ghost', onclick: () => lobby('removeSeat', { index: i }) }, 'Remove') : null));
     const full = v.seats.length >= v.maxPlayers;
+    const settingRows = meta.settings.map((def) => {
+      const current = def.options.find((o) => o.value === v.settings[def.key]) || def.options[0];
+      return h('div', { class: 'length-row' }, h('span', {}, def.label),
+        isHost
+          ? h('select', { class: 'input', onchange: (e) => lobby('setSetting', { setting: def.key, value: def.options.find((o) => String(o.value) === e.target.value).value }) },
+            def.options.map((o) => h('option', { value: o.value, selected: o.value === current.value }, o.label)))
+          : h('b', {}, current.label),
+        h('span', { class: 'muted' }, def.note));
+    });
     app.replaceChildren(h('div', { class: 'screen' }, h('div', { class: 'card lobby' },
-      h('h1', {}, THEME.title),
+      h('h1', {}, meta.name),
+      h('p', { class: 'muted center-text' }, `${meta.tagline} (${playersText(meta)})`),
       h('div', { class: 'code-row' },
         h('div', { class: 'code' }, v.code),
         h('button', { class: 'btn', onclick: copyInvite }, 'Copy invite link')),
@@ -257,12 +293,7 @@
         ? 'Local co-op: the people marked Local share this screen. You can also add bots or invite friends online with the code.'
         : 'Friends can join with this code or link. The host can add bots to fill the table.'),
       h('ul', { class: 'seats' }, rows),
-      h('div', { class: 'length-row' }, h('span', {}, 'Game length'),
-        isHost
-          ? h('select', { class: 'input', onchange: (e) => lobby('setLength', { maxRounds: Number(e.target.value) }) },
-            v.roundOptions.map((n) => h('option', { value: n, selected: n === v.settings.maxRounds }, `${lengthName(n)} (${n} rounds)`)))
-          : h('b', {}, `${lengthName(v.settings.maxRounds)} (${v.settings.maxRounds} rounds)`),
-        h('span', { class: 'muted' }, 'When time runs out, the richest player wins.')),
+      ...settingRows,
       h('div', { class: 'length-row' }, h('span', {}, 'Game speed'),
         isHost ? speedSelect() : h('b', {}, SPEEDS[v.settings.speed].label),
         h('span', { class: 'muted' }, 'How fast bots play and animations run. The host can change it during the game too.')),
@@ -270,12 +301,10 @@
         ? h('div', { class: 'row' },
           h('button', { class: 'btn', disabled: full, onclick: () => lobby('addBot') }, '+ Add bot'),
           h('button', { class: 'btn', disabled: full, onclick: () => lobby('addLocal') }, '+ Add local player'),
-          h('button', { class: 'btn primary', disabled: v.seats.length < 2, onclick: () => lobby('start') }, 'Start game'))
+          h('button', { class: 'btn primary', disabled: v.seats.length < v.minPlayers, title: v.seats.length < v.minPlayers ? `${meta.name} needs at least ${v.minPlayers} players` : '', onclick: () => lobby('start') }, 'Start game'))
         : h('p', { class: 'muted center-text' }, 'Waiting for the host to start…'),
       h('button', { class: 'link', onclick: leave }, 'Leave room'))));
   }
-
-  const lengthName = (n) => (n <= 60 ? 'Quick' : n <= 120 ? 'Standard' : 'Long');
 
   function pickToken(seatIdx) {
     const taken = new Set(S.view.seats.map((s, i) => (i === seatIdx ? null : s.token)));
@@ -306,7 +335,8 @@
       renderLobby();
       return;
     }
-    S.game = Game.fromSnapshot(view.game);
+    S.game = gameOf(view.gameType).Engine.fromSnapshot(view.game);
+    if (view.gameType !== 'tycoon') return onCardState();
     if (!S.layoutBuilt) {
       if (modalKind() === 'token') closeModal();
       buildGameLayout();
@@ -357,15 +387,17 @@
   }
 
   // ------------------------------------------------------------------ game screen
+  const topbar = () => h('div', { class: 'topbar' },
+    h('span', { class: 'room-tag' }, 'Room ', h('b', {}, S.view.code), h('span', { id: 'round', class: 'round-tag' })),
+    h('span', { id: 'speedbox' }),
+    h('button', { class: 'btn small', onclick: copyInvite }, 'Invite'),
+    h('button', { class: 'btn small ghost', onclick: leave }, 'Leave'));
+
   function buildGameLayout() {
     app.replaceChildren(h('div', { class: 'game' },
       h('div', { class: 'board-wrap' }, h('div', { class: 'board', id: 'board' })),
       h('aside', { class: 'side' },
-        h('div', { class: 'topbar' },
-          h('span', { class: 'room-tag' }, 'Room ', h('b', {}, S.view.code), h('span', { id: 'round', class: 'round-tag' })),
-          h('span', { id: 'speedbox' }),
-          h('button', { class: 'btn small', onclick: copyInvite }, 'Invite'),
-          h('button', { class: 'btn small ghost', onclick: leave }, 'Leave')),
+        topbar(),
         h('div', { id: 'players', class: 'players' }),
         h('div', { id: 'panel', class: 'panel' }),
         h('div', { id: 'log', class: 'log' })),
@@ -570,6 +602,112 @@
     el.replaceChildren(...g.log.slice(-40).map((l) => h('div', { class: 'logline' },
       l.pid != null && g.players[l.pid] ? h('i', { class: 'dot', style: `background:${g.players[l.pid].color}` }) : null, l.text)));
     el.scrollTop = el.scrollHeight;
+  }
+
+  // ------------------------------------------------------------------ card games (Blackjack, Uno, Poker...)
+  // The shell is shared: top bar, players list, log, the table area and an action panel. What goes in the table and
+  // the panel is up to the game's own screen (js/games/<id>-ui.js).
+  function onCardState() {
+    if (!S.layoutBuilt) {
+      if (modalKind() === 'token') closeModal();
+      buildCardLayout();
+      if (S.sawLobby) { S.sawLobby = false; Sfx.play('start'); }
+    }
+    renderCardGame();
+  }
+
+  function buildCardLayout() {
+    GameUI.reset();
+    window.scrollTo(0, 0); // the lobby may have been scrolled; start the game at the top
+    app.replaceChildren(h('div', { class: 'cg' },
+      h('div', { class: 'cg-main' },
+        h('div', { id: 'cg-table', class: 'cg-table' }),
+        h('div', { id: 'panel', class: 'cg-panel' })),
+      h('aside', { class: 'cg-side' },
+        topbar(),
+        h('div', { id: 'players', class: 'players cg-players' }),
+        h('div', { id: 'log', class: 'log' }))));
+    S.layoutBuilt = true;
+    S.shownOver = false; S.speedShown = null; S.panelKey = null; S.lastYou = undefined;
+    GameUI.rerenderPanel = () => renderCardPanel(true);
+  }
+
+  function cardCtx() {
+    const g = S.game, me = S.view.you;
+    return { g, view: S.view, me, act: (action, args = []) => act(action, args), mine: g.phase !== 'gameover' && g.deciderId() === me };
+  }
+
+  function renderCardGame() {
+    const g = S.game, v = S.view, me = v.you, ui = GameUI.get(v.gameType), meta = gameOf(v.gameType).meta;
+    const ctx = cardCtx();
+    renderSpeed();
+    const label = ui.roundLabel && g.phase !== 'gameover' ? ui.roundLabel(g) : '';
+    $('#round').textContent = label ? ` · ${label}` : '';
+    renderCardPlayers(g, ui);
+    ui.renderTable($('#cg-table'), ctx);
+    renderCardPanel(false);
+    renderLog();
+    const localCount = v.seats.filter((x) => x.mine).length;
+    document.title = (ctx.mine ? (localCount > 1 ? `${g.players[me].name}'s turn – ` : 'Your turn – ') : '') + meta.name;
+    if (localCount > 1 && g.phase !== 'gameover') { // local co-op: say who to hand the screen to
+      if (S.lastYou !== undefined && S.lastYou !== me) toast(`${g.players[me].name}, it's your move`);
+      S.lastYou = me;
+    }
+    if (g.phase === 'gameover' && !S.shownOver) { S.shownOver = true; Sfx.play('win'); cardOverModal(ui); }
+    refreshModal();
+    GameUI.endRender();
+  }
+
+  function renderCardPanel(force) {
+    const ui = GameUI.get(S.view.gameType), ctx = cardCtx(), el = $('#panel');
+    if (!el) return;
+    const g = S.game;
+    if (g.phase === 'gameover') {
+      el.replaceChildren(h('div', { class: 'status big winner' }, icon('assets/icons/trophy', '', 'trophy'), `${g.players[g.winner].name} wins!`),
+        S.view.isHost ? btn('Back to lobby (rematch)', 'primary', () => lobby('rematch')) : h('div', { class: 'muted' }, 'Waiting for the host to start a rematch…'));
+      S.panelKey = null;
+      return;
+    }
+    const key = ui.panelKey ? ui.panelKey(ctx) : null;
+    if (!force && key !== null && key === S.panelKey) return; // nothing that matters to the panel changed: keep inputs as they are
+    S.panelKey = key;
+    el.replaceChildren(...ui.renderPanel(ctx).flat().filter(Boolean));
+  }
+
+  function renderCardPlayers(g, ui) {
+    const v = S.view, el = $('#players');
+    const localCount = v.seats.filter((x) => x.mine).length;
+    const playing = g.phase !== 'gameover' && g.phase !== 'result' ? g.deciderId() : -1;
+    el.classList.toggle('two-col', g.players.length > 4);
+    el.replaceChildren(...g.players.map((p) => {
+      const seat = v.seats[p.id] || {};
+      return h('div', { 'data-pid': p.id, class: `pcard${p.id === playing ? ' current' : ''}${p.out ? ' bankrupt' : ''}`, style: `--c:${p.color}` },
+        h('div', { class: 'ptoken' }, Board.tokenIcon(p.token)),
+        h('div', { class: 'pinfo' },
+          h('div', { class: 'pname' }, p.name,
+            p.id === v.you ? h('span', { class: 'tag' }, localCount > 1 ? 'playing' : 'you') : (seat.mine && localCount > 1 ? h('span', { class: 'tag' }, 'local') : null),
+            seat.type === 'bot' ? h('span', { class: 'tag' }, icon('assets/icons/bot', '', 'tag-icon bot'), 'Bot') : null,
+            seat.type === 'human' && !seat.connected && !p.out ? h('span', { class: 'tag warn' }, seat.botControlled ? 'bot-controlled' : 'offline') : null,
+            g.phase === 'result' && !p.out && g.ready.includes(p.id) ? h('span', { class: 'tag' }, 'ready') : null),
+          h('div', { class: 'prow' }, ui.seatSummary(g, p))),
+        v.isHost && seat.type === 'human' && !seat.mine && !p.out && !seat.connected
+          ? h('button', { class: 'btn small', onclick: (e) => { e.stopPropagation(); lobby('toBot', { index: p.id }); } }, 'Make bot')
+          : null);
+    }));
+  }
+
+  function cardOverModal(ui) {
+    openModal(() => {
+      const g = S.game, v = S.view;
+      return h('div', { class: 'gameover' },
+        confetti(),
+        icon('assets/icons/trophy', '', 'trophy big'),
+        h('h1', {}, `${g.players[g.winner].name} wins!`),
+        h('ol', {}, ui.standings(g).map((line) => h('li', {}, line))),
+        h('div', { class: 'btn-row' },
+          v.isHost ? btn('Back to lobby', 'primary', () => { closeModal(); lobby('rematch'); }) : null,
+          btn('Close', '', closeModal)));
+    }, { kind: 'gameover', live: false });
   }
 
   // ------------------------------------------------------------------ action panel
@@ -980,7 +1118,7 @@
 
   // ------------------------------------------------------------------ boot
   function boot() {
-    document.title = THEME.title;
+    document.title = THEME.hubTitle;
     const code = (new URLSearchParams(location.search).get('room') || '').toUpperCase();
     let saved = readSession();
     if (!(saved && saved.room && (!code || saved.room === code)) && code) { // new tab / restarted browser: use the browser's memory

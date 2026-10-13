@@ -4,7 +4,9 @@
   'use strict';
 
   const THEME = {
-    title: 'Tycoon',
+    title: 'Tycoon',                 // the board game's own name
+    hubTitle: 'Game Night',          // the home screen that lists all the games
+    hubTagline: 'Pick a game, invite your friends, and add bots to fill the table.',
     // Images are looked up by convention (see assets/README.md); emoji below are
     // shown until/unless a matching image file exists.
     assetExtensions: ['png', 'svg', 'jpg', 'webp'],

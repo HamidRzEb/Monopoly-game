@@ -11,7 +11,8 @@ exists, nothing is shown (the game never uses emoji). Transparent PNGs work best
 | `tokens/` | `hat`, `car`, `dog`, `ship`, `thimble`, `boot`, `cat`, `plane` |
 | `cards/`  | `chance`, `chest` — blank card faces shown when a card is drawn |
 | `dice/`   | `1` … `6` (svg or png) |
-| (root)    | `logo.png` — title in the middle of the board and on the home screen |
+| (root)    | `logo.png` — title in the middle of the board and on the Tycoon tile of the home screen |
+| `games/`  | `<game id>.png` — optional picture for a game's tile on the home screen (`blackjack`, `uno`, `poker`); a symbol is shown without it |
 
 The `Gemini_Generated_Image_*.jpg` sprite sheets are the originals. `node tools/slice-assets.js`
 (needs `npm i --no-save sharp`) cuts them into the files above; the street -> picture assignment

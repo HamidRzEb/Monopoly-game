@@ -9,11 +9,10 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { Game } = require('./js/engine.js');
 const { createStore } = require('./js/store.js');
-const AI = require('./js/ai.js');
-const { TOKENS, PLAYER_COLORS, BOT_NAMES, RULES, SPEEDS } = require('./js/data.js');
-const DEFAULT_SETTINGS = { maxRounds: RULES.maxRounds, speed: 'relaxed' };
+const AI = require('./js/ai.js'); // Tycoon's bot (the other games bring their own, see js/games/)
+const Games = require('./js/games/index.js');
+const { TOKENS, PLAYER_COLORS, BOT_NAMES, SPEEDS } = require('./js/data.js');
 
 const PORT = Number(process.env.PORT) || 3000;
 const ROOT = __dirname;
@@ -24,6 +23,18 @@ const TRADE_TIMEOUT_MS = 60 * 1000;  // unanswered trade offers expire
 const ROOM_IDLE_MS = 10 * 60 * 1000; // a lobby with no connected humans is deleted after this long (games are kept much longer, see below)
 
 const rooms = new Map();
+
+// ---------------------------------------------------------------- game types
+// A room plays one game, chosen when it is created (room.type). Each game is a module in js/games/ that says how
+// many players it takes, what settings the lobby offers, how to create a game and which actions players may send.
+const modOf = (room) => Games.get(room.type);
+const isTycoon = (room) => room.type === 'tycoon';
+const maxPlayersOf = (room) => modOf(room).meta.maxPlayers;
+function defaultSettings(type) {
+  const settings = { speed: 'relaxed' };
+  for (const def of Games.get(type).meta.settings) settings[def.key] = def.default;
+  return settings;
+}
 
 // ---------------------------------------------------------------- saving games to disk
 // Every room (lobby or game) is written to DATA_DIR/rooms/<CODE>.json shortly after it changes and reloaded
@@ -40,6 +51,7 @@ function serializeRoom(room) {
   return {
     version: 1,
     code: room.code,
+    type: room.type,
     host: room.host,
     settings: room.settings,
     lastActivity: Math.floor(room.lastActivity / 60000) * 60000, // to the minute, so idle rooms don't rewrite the file
@@ -72,13 +84,16 @@ function restoreRooms() {
   for (const { code, record: rec } of store.loadAll()) {
     try {
       if (rec.version !== 1 || rec.code !== code || !Array.isArray(rec.seats) || !rec.seats.length) throw new Error('unrecognised format');
-      const game = rec.game ? Game.fromSave(rec.game) : null;
+      const type = rec.type || Games.DEFAULT_GAME; // rooms saved before there were several games are Tycoon
+      const mod = Games.get(type);
+      if (!mod) throw new Error(`unknown game "${type}"`);
+      const game = rec.game ? mod.Engine.fromSave(rec.game) : null;
       if (game && game.players.length !== rec.seats.length) throw new Error('seats do not match players');
       const idleFor = Date.now() - (rec.lastActivity || 0);
       const room = {
-        code, host: Math.min(Math.max(rec.host | 0, 0), rec.seats.length - 1), game, snapshot: game ? game.snapshot() : null,
+        code, type, host: Math.min(Math.max(rec.host | 0, 0), rec.seats.length - 1), game, snapshot: game && type === 'tycoon' ? game.snapshot() : null,
         trade: null, botTimer: null, saveTimer: null, lastActivity: Date.now(),
-        settings: { ...DEFAULT_SETTINGS, ...(rec.settings || {}) },
+        settings: { ...defaultSettings(type), ...(rec.settings || {}) },
         seats: rec.seats.map((s) => ({
           name: String(s.name), type: s.type === 'bot' ? 'bot' : 'human', token: s.token, key: s.key || null,
           local: !!s.local, rejoinable: !!s.rejoinable, streams: new Set(), connected: s.type === 'bot', lastSeen: Date.now(),
@@ -254,22 +269,26 @@ function effectiveYou(room, i) {
 // ---------------------------------------------------------------- state broadcast
 function viewFor(room, you) {
   const g = room.game;
+  const me = effectiveYou(room, you);
+  const meta = modOf(room).meta;
   return {
     code: room.code,
     build: buildId(),
+    gameType: room.type,
     status: g ? 'playing' : 'lobby',
-    you: effectiveYou(room, you),
+    you: me,
     isHost: isHostKey(room, room.seats[you].key),
     host: room.host,
-    maxPlayers: RULES.maxPlayers,
+    minPlayers: meta.minPlayers,
+    maxPlayers: meta.maxPlayers,
     settings: room.settings,
-    roundOptions: RULES.roundOptions,
     seats: room.seats.map((s, i) => ({
       name: s.name, type: s.type, token: s.token, connected: s.connected,
       mine: !!s.key && s.key === room.seats[you].key, // seats this browser controls (local co-op)
       botControlled: g ? isBotControlled(room, i) : s.type === 'bot',
     })),
-    game: g ? room.snapshot : null,
+    // Tycoon has no secrets, so one shared snapshot serves everyone; the card games show each player only their own cards.
+    game: g ? (isTycoon(room) ? room.snapshot : g.snapshot(me)) : null,
     trade: room.trade ? { id: room.trade.id, from: room.trade.from, to: room.trade.to, give: room.trade.give, get: room.trade.get } : null,
   };
 }
@@ -277,7 +296,7 @@ function viewFor(room, you) {
 function broadcast(room) {
   room.lastActivity = Date.now();
   scheduleSave(room);
-  if (room.game) room.snapshot = room.game.snapshot();
+  if (room.game && isTycoon(room)) room.snapshot = room.game.snapshot();
   const done = new Set();
   room.seats.forEach((seat, i) => {
     if (!seat.key || done.has(seat.key)) return;
@@ -331,6 +350,7 @@ function runBot(room) {
   if (!g || g.phase === 'gameover') return;
   const d = g.decider();
   if (!isBotControlled(room, d.id)) return scheduleBot(room);
+  if (!isTycoon(room)) return runGenericBot(room, d);
   const before = { roll: g.rollSeq, card: g.cardSeq, turn: g.turnCount };
   const { bot, anim } = pace(room);
   try {
@@ -348,6 +368,20 @@ function runBot(room) {
   if (g.cardSeq !== before.card) delay += 2200 * anim;
   if (g.turnCount !== before.turn) delay += 1500 * bot; // a visible beat when the turn passes to someone else
   afterChange(room, delay);
+}
+
+// The card games: the bot decides from exactly what that seat is shown (its snapshot), then the move goes through
+// the same validated action methods a human's request would.
+function runGenericBot(room, d) {
+  const g = room.game, mod = modOf(room);
+  try {
+    const move = mod.decide(mod.Engine.fromSnapshot(g.snapshot(d.id)), d.id);
+    g[move.action](d.id, ...move.args);
+  } catch (e) {
+    console.error(`bot error (${room.type}):`, e);
+    try { const m = g.fallbackMove(d.id); g[m.action](d.id, ...m.args); } catch (e2) { console.error('bot fallback failed:', e2.message); }
+  }
+  afterChange(room, (700 + Math.random() * 500) * pace(room).bot);
 }
 
 function fallbackAction(g, id) {
@@ -381,13 +415,6 @@ function openTrade(room, t) {
 }
 
 // ---------------------------------------------------------------- request handlers
-const GAME_ACTIONS = {
-  rollDice: [], buy: [], declineBuy: [], endTurn: [], payJailFine: [], useJailCard: [],
-  declareBankruptcy: [], auctionPass: [],
-  build: ['int'], sellHouse: ['int'], mortgage: ['int'], unmortgage: ['int'], auctionBid: ['int'],
-  borrow: ['int'], repay: ['int', 'int'], // the bank: (amount) and (loanId, amount)
-};
-
 function cleanOffer(o) {
   o = o || {};
   const int = (v) => (Number.isInteger(v) && v >= 0 && v <= 1e6 ? v : fail('Invalid trade.'));
@@ -400,7 +427,7 @@ function cleanOffer(o) {
 // player is connected, and not once bankrupt. Taking it back issues a NEW key (the old one stops working).
 function isReclaimable(room, i) {
   const s = room.seats[i], g = room.game;
-  if (!g || !s || (g.players[i] && g.players[i].bankrupt)) return false;
+  if (!g || !s || (g.players[i] && (g.players[i].bankrupt || g.players[i].out))) return false; // out of the game for good
   return (s.type === 'human' && !s.connected) || (s.type === 'bot' && !!s.rejoinable);
 }
 function reclaimSeat(room, i) {
@@ -422,6 +449,7 @@ function reclaimSeat(room, i) {
 function roomInfo(room, key) {
   return {
     code: room.code,
+    game: room.type,
     status: room.game ? 'playing' : 'lobby',
     valid: !!key && room.seats.some((s) => s.key === key), // does this browser's saved key still work?
     seats: room.seats.map((s, i) => ({ index: i, name: s.name, token: s.token, reclaimable: isReclaimable(room, i), bot: s.type === 'bot' })),
@@ -434,11 +462,13 @@ const routes = {
       const idle = [...rooms.values()].filter((r) => !connectedHumans(r).length).sort((a, b) => a.lastActivity - b.lastActivity)[0];
       if (idle) destroyRoom(idle); else fail('The server is full. Try again later.', 503);
     }
-    const room = { code: newCode(), seats: [], host: 0, game: null, snapshot: null, trade: null, botTimer: null, lastActivity: Date.now(), settings: { ...DEFAULT_SETTINGS } };
+    const type = body.game == null ? Games.DEFAULT_GAME : String(body.game);
+    if (!Games.get(type)) fail('Unknown game.');
+    const room = { code: newCode(), type, seats: [], host: 0, game: null, snapshot: null, trade: null, botTimer: null, lastActivity: Date.now(), settings: defaultSettings(type) };
     const seat = makeSeat(room, { name: clean(body.name, 'Player'), type: 'human' });
     room.seats.push(seat);
     // Local co-op: extra players who share this browser
-    const locals = Array.isArray(body.locals) ? body.locals.slice(0, RULES.maxPlayers - 1) : [];
+    const locals = Array.isArray(body.locals) ? body.locals.slice(0, maxPlayersOf(room) - 1) : [];
     for (const n of locals) addLocalSeat(room, seat.key, clean(n, 'Player'));
     rooms.set(room.code, room);
     scheduleSave(room);
@@ -465,7 +495,7 @@ const routes = {
       broadcast(room);
       return { room: room.code, key, seat: i };
     }
-    if (room.seats.length >= RULES.maxPlayers) fail('The room is full.');
+    if (room.seats.length >= maxPlayersOf(room)) fail('The room is full.');
     const seat = makeSeat(room, { name: clean(body.name, 'Player'), type: 'human' });
     room.seats.push(seat);
     broadcast(room);
@@ -491,17 +521,27 @@ const routes = {
         if (room.game) room.game.say(`Game speed set to ${SPEEDS[body.speed].label}.`);
         break;
       }
-      case 'setLength': {
+      case 'setSetting': { // any game-specific option the game module lists (rounds, hands, match length...)
+        if (!isHost) fail('Only the host can change the game settings.', 403);
+        if (room.game) fail('The game has started.');
+        const def = modOf(room).meta.settings.find((d) => d.key === body.setting);
+        const opt = def && def.options.find((o) => o.value === body.value);
+        if (!opt) fail('Invalid setting.');
+        room.settings[def.key] = opt.value;
+        break;
+      }
+      case 'setLength': { // older clients: Tycoon's game length
         if (!isHost) fail('Only the host can change the game length.', 403);
         if (room.game) fail('The game has started.');
-        if (!RULES.roundOptions.includes(body.maxRounds)) fail('Invalid game length.');
+        const def = modOf(room).meta.settings.find((d) => d.key === 'maxRounds');
+        if (!def || !def.options.some((o) => o.value === body.maxRounds)) fail('Invalid game length.');
         room.settings.maxRounds = body.maxRounds;
         break;
       }
       case 'addLocal': {
         if (!isHost) fail('Only the host can add local players.', 403);
         if (room.game) fail('The game has started.');
-        if (room.seats.length >= RULES.maxPlayers) fail('The room is full.');
+        if (room.seats.length >= maxPlayersOf(room)) fail('The room is full.');
         addLocalSeat(room, body.key, clean(body.name, `Player ${room.seats.length + 1}`));
         break;
       }
@@ -517,7 +557,7 @@ const routes = {
       case 'addBot': {
         if (!isHost) fail('Only the host can add bots.', 403);
         if (room.game) fail('The game has started.');
-        if (room.seats.length >= RULES.maxPlayers) fail('The room is full.');
+        if (room.seats.length >= maxPlayersOf(room)) fail('The room is full.');
         const used = new Set(room.seats.map((s) => s.name));
         const name = BOT_NAMES.find((n) => !used.has(n)) || 'Bot';
         room.seats.push(makeSeat(room, { name, type: 'bot' }));
@@ -548,17 +588,17 @@ const routes = {
       case 'start': {
         if (!isHost) fail('Only the host can start the game.', 403);
         if (room.game) fail('Already started.');
-        if (room.seats.length < 2) fail('You need at least 2 players. Add a bot!');
+        const need = modOf(room).meta.minPlayers;
+        if (room.seats.length < need) fail(`You need at least ${need} players. Add a bot!`);
         const hostKey = hostSeat(room).key;
         for (let i = room.seats.length - 1; i > 0; i--) { // random turn order
           const j = crypto.randomInt(i + 1);
           [room.seats[i], room.seats[j]] = [room.seats[j], room.seats[i]];
         }
         room.host = room.seats.findIndex((s) => s.key === hostKey);
-        room.game = new Game({
-          players: room.seats.map((s, i) => ({ name: s.name, color: PLAYER_COLORS[i], token: s.token, ai: s.type === 'bot' })),
-          rules: { maxRounds: room.settings.maxRounds },
-        });
+        room.game = modOf(room).create(
+          room.seats.map((s, i) => ({ name: s.name, color: PLAYER_COLORS[i], token: s.token, ai: s.type === 'bot' })),
+          room.settings);
         room.trade = null;
         break;
       }
@@ -586,7 +626,7 @@ const routes = {
     if (!g) fail('The game has not started.');
     const name = String(body.action);
 
-    if (name === 'proposeTrade' || name === 'counterTrade') {
+    if (isTycoon(room) && (name === 'proposeTrade' || name === 'counterTrade')) {
       const counter = name === 'counterTrade';
       let to = body.to;
       if (counter) { // the player being offered a trade answers with different terms (back to the proposer)
@@ -620,7 +660,7 @@ const routes = {
       return { ok: true };
     }
 
-    if (name === 'respondTrade' || name === 'cancelTrade') {
+    if (isTycoon(room) && (name === 'respondTrade' || name === 'cancelTrade')) {
       const t = room.trade;
       if (!t) fail('That offer is no longer open.');
       if (name === 'cancelTrade') {
@@ -642,7 +682,8 @@ const routes = {
       return { ok: true };
     }
 
-    const spec = GAME_ACTIONS[name];
+    const actions = modOf(room).actions;
+    const spec = Object.prototype.hasOwnProperty.call(actions, name) ? actions[name] : null;
     if (!spec) fail('Unknown action.');
     const args = spec.map((kind, k) => {
       const v = Array.isArray(body.args) ? body.args[k] : undefined;
@@ -744,7 +785,9 @@ let buildCache = { at: 0, id: '0' };
 function buildId() {
   if (Date.now() - buildCache.at < 1000) return buildCache.id;
   const h = crypto.createHash('md5');
-  const files = ['index.html', ...['css', 'js'].flatMap((d) => fs.readdirSync(path.join(ROOT, d)).map((f) => `${d}/${f}`))];
+  const walk = (dir) => fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]));
+  const files = ['index.html', ...walk('css'), ...walk('js')];
   for (const f of files) {
     try { const st = fs.statSync(path.join(ROOT, f)); h.update(`${f}:${st.size}:${st.mtimeMs};`); } catch { /* ignore */ }
   }

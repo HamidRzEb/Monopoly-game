@@ -464,3 +464,204 @@ h1, h2, h3 { margin: 0 0 .4em; }
 .rejoin-seat .icon img { width: 100%; height: 100%; object-fit: contain; padding: 9%; }
 .rs-name { font-weight: 700; flex: 1; }
 .rejoin-seat small { color: var(--muted); }
+
+/* ======================================================================= game hub (home screen) */
+.card.hub { width: min(880px, 100%); }
+.hub-label { font-weight: 800; font-size: .85rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin-top: 4px; }
+.game-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.game-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; padding: 16px 12px 14px; border: 2px solid var(--line); border-radius: 14px; background: #fff; cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
+.game-tile:hover { transform: translateY(-3px); border-color: var(--accent); box-shadow: 0 8px 20px #2d7ff926; }
+.game-tile:focus-visible { outline: 3px solid #2d7ff966; outline-offset: 2px; }
+.tile-art { display: grid; place-items: center; height: 76px; width: 100%; font-size: 3rem; line-height: 1; }
+.tile-art img { max-height: 76px; max-width: 100%; object-fit: contain; }
+.tile-name { font-size: 1.15rem; font-weight: 800; }
+.tile-tag { font-size: .85rem; color: var(--muted); }
+.tile-players { font-size: .75rem; font-weight: 700; background: #eef2f6; border-radius: 99px; padding: .15em .7em; color: #44505e; }
+.game-dialog { padding: 6px 6px 2px; }
+.game-dialog h2 { margin-bottom: 6px; font-size: 1.5rem; }
+.game-tagline { margin: 0 0 12px; line-height: 1.5; }
+.game-facts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.game-dialog .hub-label { margin: 0 0 8px; }
+.game-actions { display: grid; gap: 12px; margin-top: 22px; }
+.game-dialog .btn.big { width: 100%; }
+.game-dialog .small-note { margin: 16px 0 6px; line-height: 1.5; }
+.game-dialog .link { display: block; margin: 12px auto 4px; }
+.rule-list { margin: 0; padding-left: 1.3em; font-size: .94rem; line-height: 1.5; color: #34414f; }
+.rule-list li { margin: 8px 0; }
+
+/* ======================================================================= card games: shared screen */
+.cg { display: flex; gap: 10px; padding: 10px; min-height: 100vh; align-items: flex-start; }
+.cg-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+/* on wide screens the table and your controls sit in the vertical middle of the page, not stuck to the top */
+@media (min-width: 901px) { .cg-main { align-self: stretch; justify-content: center; min-height: calc(100vh - 20px); gap: 16px; } }
+.cg-side { width: 380px; flex: none; position: sticky; top: 10px; height: calc(100vh - 20px); display: flex; flex-direction: column; gap: 8px; }
+.cg-table { min-width: 0; display: flex; flex-direction: column; flex: 1 1 auto; }
+.cg-table > .felt { flex: 1 1 auto; max-height: 800px; }
+.cg-panel { background: var(--card); border-radius: 12px; padding: 10px 14px; box-shadow: 0 2px 10px #0001; }
+.cg-panel .btn-row { margin: 6px 0; }
+.cg-players { max-height: 45%; }
+
+.felt { background: radial-gradient(ellipse at 50% 40%, #2f8f5a 0%, #1f6b42 62%, #164d31 100%); border-radius: 20px; padding: 18px 14px 12px; color: #fff; box-shadow: inset 0 0 0 6px #7a4b22, inset 0 0 0 8px #00000030, 0 6px 20px #0003; min-height: 320px; display: flex; flex-direction: column; gap: 14px; align-items: center; justify-content: space-around; }
+.felt .muted, .felt-note { color: #cfe8d8; }
+.felt-note { font-size: .78rem; letter-spacing: .03em; }
+.felt .tag { background: #ffffff30; color: #fff; }
+
+.cg-chips { display: inline-flex; align-items: center; gap: .35em; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cg-chip-dot { width: .95em; height: .95em; border-radius: 50%; background: radial-gradient(circle, #fff 0 22%, #d32f2f 24% 100%); border: .14em dashed #fff; box-shadow: 0 1px 2px #0005; display: inline-block; flex: none; }
+.bj-name { font-weight: 800; display: flex; align-items: center; gap: 4px; justify-content: center; flex-wrap: wrap; }
+.bj-total { font-weight: 800; font-size: 1.05rem; min-height: 1.3em; }
+.bj-badge { display: inline-block; font-size: .72rem; font-weight: 900; letter-spacing: .05em; border-radius: 99px; padding: .15em .7em; background: #ffffff30; color: #fff; }
+.bj-badge.win { background: #2e9e5b; box-shadow: 0 0 10px #4cff9a88; }
+.bj-badge.lose { background: #c62828; }
+.bj-badge.push { background: #5b6b7a; }
+.bj-chips { font-size: .9rem; }
+
+/* ---- playing cards */
+.pk-card { position: relative; flex: none; width: 62px; height: 90px; background: #fff; color: #1d2733; border: 1px solid #b9c0c7; border-radius: 8px; box-shadow: 0 2px 5px #0004; font-weight: 800; user-select: none; }
+.pk-card.red { color: #c62828; }
+.pk-corner { position: absolute; top: 4px; left: 6px; font-size: .95rem; line-height: 1.05; text-align: center; }
+.pk-pip { position: absolute; inset: 0; display: grid; place-items: center; font-size: 2.1rem; padding-top: 10px; }
+.pk-card.small { width: 44px; height: 64px; border-radius: 6px; }
+.pk-card.small .pk-corner { font-size: .72rem; top: 2px; left: 4px; }
+.pk-card.small .pk-pip { font-size: 1.5rem; padding-top: 8px; }
+.pk-card.back { background: repeating-linear-gradient(45deg, #2a4fa8 0 6px, #1e3a80 6px 12px); border: 3px solid #fff; }
+.pk-card.empty { background: #ffffff14; border: 2px dashed #ffffff55; box-shadow: none; }
+.pk-card.deal, .uno-card.deal { animation: dealin .45s ease-out both; }
+@keyframes dealin { from { transform: translateY(-40px) rotate(-12deg) scale(.8); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---- blackjack */
+.bj-dealer { text-align: center; display: grid; gap: 6px; justify-items: center; }
+.bj-hand { display: flex; justify-content: center; min-height: 20px; padding: 0 0 0 22px; }
+.bj-hand .pk-card { margin-left: -22px; }
+.bj-seats { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; width: 100%; }
+.bj-seat { min-width: 170px; max-width: 230px; flex: 1 1 170px; background: #00000026; border: 3px solid transparent; border-top: 5px solid var(--c); border-radius: 14px; padding: 8px 8px 10px; text-align: center; display: grid; gap: 5px; justify-items: center; align-content: start; }
+.bj-seat.me { background: #00000040; }
+.bj-seat.active { border-color: #ffd54a; box-shadow: 0 0 16px #ffd54a99; }
+.bj-seat.out { opacity: .4; }
+.bj-bet { font-size: .88rem; min-height: 1.2em; }
+
+/* ---- uno */
+.uno-felt { background: radial-gradient(ellipse at 50% 40%, #3b6fb6 0%, #274d8a 62%, #1a3566 100%); }
+.uno-opps { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; }
+.uno-opp { min-width: 130px; background: #00000030; border: 3px solid transparent; border-top: 5px solid var(--c); border-radius: 12px; padding: 6px 10px 8px; text-align: center; display: grid; gap: 4px; justify-items: center; }
+.uno-opp.turn { border-color: #ffd54a; box-shadow: 0 0 14px #ffd54aaa; }
+.uno-call { background: #ffd54a; color: #1d2733; border-radius: 99px; padding: 0 .55em; font-size: .72rem; font-weight: 900; animation: cardpulse 1s infinite; }
+.uno-fan { display: flex; padding-left: 22px; min-height: 20px; justify-content: center; flex-wrap: wrap; }
+.uno-fan .uno-card { margin-left: -22px; }
+.uno-center { display: flex; align-items: center; justify-content: center; gap: 22px; margin: 6px 0; }
+.uno-pile { position: relative; background: none; border: 0; padding: 0; cursor: default; }
+.uno-pile.can { cursor: pointer; filter: drop-shadow(0 0 10px #ffd54a); animation: glow 1.4s ease-in-out infinite; }
+.uno-pile.can:hover { transform: translateY(-3px); }
+.uno-count { position: absolute; right: -8px; bottom: -8px; background: #fff; color: #1d2733; border-radius: 99px; font-size: .72rem; font-weight: 800; padding: .1em .55em; box-shadow: 0 1px 4px #0006; }
+.uno-discard { border-radius: 14px; padding: 5px; box-shadow: 0 0 0 6px var(--ring, #fff); transition: box-shadow .3s; }
+.uno-discard.ring-r { --ring: #d32f2f; } .uno-discard.ring-y { --ring: #f6c915; } .uno-discard.ring-g { --ring: #2e9e5b; } .uno-discard.ring-b { --ring: #1e6fd9; }
+.uno-dir { font-size: 2.2rem; line-height: 1; opacity: .85; }
+.uno-colorline { font-size: .95rem; }
+.uno-colorname { text-transform: capitalize; }
+.c-r { color: #ff7b72; } .c-y { color: #ffe066; } .c-g { color: #6fe39a; } .c-b { color: #7db7ff; }
+.uno-over { background: #00000040; border-radius: 12px; padding: 8px 12px; display: grid; gap: 6px; width: min(100%, 560px); }
+.uno-leftover { display: flex; align-items: center; gap: 10px; }
+
+.uno-card { position: relative; flex: none; width: 62px; height: 92px; border-radius: 10px; border: 3px solid #fff; box-shadow: 0 2px 6px #0005; color: #fff; font-weight: 900; display: grid; place-items: center; user-select: none; overflow: hidden; }
+.uno-card.small { width: 36px; height: 54px; border-width: 2px; border-radius: 6px; }
+.uno-card .uno-face { font-size: 1.7rem; background: #ffffffe8; border-radius: 50%; width: 76%; aspect-ratio: 1.25; display: grid; place-items: center; transform: rotate(-18deg); text-shadow: none; }
+.uno-card.small .uno-face { font-size: .9rem; }
+.uno-card .uno-corner { position: absolute; top: 2px; left: 5px; font-size: .78rem; text-shadow: 0 1px 1px #0006; }
+.uno-card.small .uno-corner { display: none; }
+.uno-card.uc-r { background: #d32f2f; } .uno-card.uc-y { background: #f6c915; } .uno-card.uc-g { background: #2e9e5b; } .uno-card.uc-b { background: #1e6fd9; }
+.uno-card.uc-r .uno-face { color: #d32f2f; } .uno-card.uc-y .uno-face { color: #c99a00; } .uno-card.uc-g .uno-face { color: #2e9e5b; } .uno-card.uc-b .uno-face { color: #1e6fd9; }
+.uno-card.uc-w { background: conic-gradient(#d32f2f 0 25%, #f6c915 0 50%, #2e9e5b 0 75%, #1e6fd9 0); }
+.uno-card.uc-w .uno-face { color: #1d2733; }
+.uno-card.back { background: #1d2733; border-color: #fff; }
+.uno-card.back span { font-size: .85rem; letter-spacing: .06em; transform: rotate(-18deg); background: #ffd54a; color: #c62828; padding: .1em .35em; border-radius: 50%; }
+.uno-card.small.back span { font-size: .5rem; }
+
+.uno-hand { display: flex; flex-wrap: wrap; gap: 6px; padding: 14px 4px 4px; min-height: 100px; justify-content: center; }
+.uno-hcard { background: none; border: 0; padding: 0; border-radius: 12px; cursor: default; transition: transform .12s; }
+.uno-hcard.playable { cursor: pointer; transform: translateY(-8px); filter: drop-shadow(0 4px 6px #0004); }
+.uno-hcard.playable:hover { transform: translateY(-18px); }
+.uno-hcard.dim { opacity: .5; }
+.uno-hcard.drawn { outline: 3px solid #ffd54a; outline-offset: 2px; }
+.uno-hcard:disabled { cursor: default; }
+.btn.uno-color { color: #fff; font-weight: 800; text-transform: capitalize; border: 0; padding: .7em 1.1em; }
+.btn.uno-color.uc-y { color: #1d2733; }
+.btn.uno-color.uc-r { background: #d32f2f; } .btn.uno-color.uc-y { background: #f6c915; } .btn.uno-color.uc-g { background: #2e9e5b; } .btn.uno-color.uc-b { background: #1e6fd9; }
+
+/* ---- poker */
+.pk-board { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.pk-pot { font-size: 1.25rem; font-weight: 800; display: flex; align-items: center; gap: .4em; }
+.pk-results { display: grid; gap: 2px; text-align: center; background: #00000040; border-radius: 10px; padding: 6px 12px; }
+.pk-result { font-weight: 700; }
+.pk-seats { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; width: 100%; }
+.pk-seat { width: 150px; background: #00000030; border: 3px solid transparent; border-top: 5px solid var(--c); border-radius: 12px; padding: 6px 6px 8px; text-align: center; display: grid; gap: 4px; justify-items: center; align-content: start; }
+.pk-seat.me { background: #00000050; }
+.pk-seat.active { border-color: #ffd54a; box-shadow: 0 0 16px #ffd54a99; }
+.pk-seat.folded { opacity: .45; }
+.pk-seat.winner { border-color: #4cff9a; box-shadow: 0 0 18px #4cff9a99; }
+.pk-hole { display: flex; gap: 4px; min-height: 64px; align-items: center; }
+.pk-hole .pk-card { margin: 0; }
+.pk-bet { font-size: .8rem; background: #00000040; border-radius: 99px; padding: .1em .7em; }
+.pk-handname { font-size: .78rem; font-weight: 700; color: #ffe9a0; }
+.pk-button { background: #ffd54a; color: #1d2733; border-radius: 50%; width: 1.5em; height: 1.5em; display: inline-grid; place-items: center; font-size: .75rem; font-weight: 900; box-shadow: 0 1px 3px #0006; }
+.pk-raise { border-top: 1px dashed var(--line); margin-top: 6px; padding-top: 4px; }
+.pk-slider { width: 100%; }
+.pk-raise .input { max-width: 130px; }
+
+/* ======================================================================= card games on a phone */
+/* Table first, then your controls pinned to the bottom of the screen so they are always in reach; players and log below. */
+@media (max-width: 900px) {
+  .cg { flex-direction: column; padding: 6px; gap: 8px; min-height: 100vh; }
+  .cg-main, .cg-side { display: contents; }
+  .cg-side .topbar { order: -1; }
+  .cg-table { display: block; flex: none; }
+  .cg-table > .felt { max-height: none; }
+  .cg-panel { position: sticky; bottom: 0; z-index: 20; max-height: 52vh; overflow: auto; border-radius: 14px; box-shadow: 0 -4px 16px #0003; padding: 8px 12px 10px; }
+  .cg-players { order: 1; display: grid; grid-template-columns: 1fr 1fr; max-height: none; gap: 6px; }
+  .cg-players .pcard { padding: 3px 6px; }
+  .cg-players .pcard .ptoken { width: 28px; height: 28px; }
+  .cg-side .log { order: 2; flex: none; max-height: 150px; }
+  body:has(.cg) #sound-toggle { display: none; }
+
+  .felt { min-height: 0; padding: 12px 8px 10px; gap: 12px; border-radius: 16px; box-shadow: inset 0 0 0 4px #7a4b22, inset 0 0 0 5px #00000030, 0 4px 14px #0003; }
+  .felt-note { display: none; }
+  .pk-card { width: 46px; height: 66px; border-radius: 6px; }
+  .pk-corner { font-size: .8rem; top: 3px; left: 4px; }
+  .pk-pip { font-size: 1.55rem; padding-top: 8px; }
+  .pk-card.small { width: 38px; height: 54px; }
+  .pk-card.small .pk-corner { font-size: .66rem; }
+  .pk-card.small .pk-pip { font-size: 1.2rem; padding-top: 6px; }
+
+  .bj-seats, .pk-seats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .bj-seat { min-width: 0; max-width: none; padding: 6px 4px 8px; }
+  .pk-seat { width: auto; min-width: 0; padding: 5px 4px 7px; }
+  .bj-hand { padding-left: 26px; }
+  .bj-hand .pk-card { margin-left: -26px; }
+  .pk-board { gap: 4px; }
+  .pk-hole { min-height: 54px; }
+
+  .uno-felt { gap: 10px; }
+  .uno-opps { gap: 6px; }
+  .uno-opp { min-width: 0; flex: 1 1 28%; padding: 5px 4px 6px; }
+  .uno-center { gap: 16px; margin: 0; }
+  .uno-card { width: 46px; height: 68px; border-width: 2px; }
+  .uno-card .uno-face { font-size: 1.15rem; }
+  .uno-card .uno-corner { font-size: .66rem; }
+  .uno-card.small { width: 26px; height: 40px; }
+  .uno-card.small .uno-face { font-size: .7rem; }
+  .uno-fan { padding-left: 17px; flex-wrap: nowrap; }
+  .uno-fan .uno-card { margin-left: -17px; }
+  .uno-hand { gap: 3px; padding: 10px 0 2px; min-height: 0; }
+  .uno-hcard.playable { transform: translateY(-5px); }
+  .uno-hcard.playable:hover { transform: translateY(-5px); }
+  .uno-over { width: 100%; }
+}
+
+/* ======================================================================= card games on a big screen */
+/* The table is tall there, so everything on it is drawn larger. */
+@media (min-width: 1400px) and (min-height: 820px) {
+  .felt > * { zoom: 1.3; }
+  .cg-side { width: 400px; }
+}
+@media (min-width: 1800px) and (min-height: 1000px) {
+  .felt > * { zoom: 1.5; }
+}
